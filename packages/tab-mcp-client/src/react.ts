@@ -34,14 +34,14 @@ import {
 	type Grant,
 	type IdentityAssertionRequest,
 	type IdentityState,
+	type ModelContextRegisterToolOptions,
+	type ModelContextTool,
 	type PairingCode,
 	type ReconnectingInfo,
-	type RegisterToolOptions,
 	type SessionInfo,
 	TabMcp,
 	type TabMcpEventMap,
 	type TabMcpOptions,
-	type Tool,
 	type ToolCallEnd,
 	type ToolCallStart,
 } from "./index.ts";
@@ -96,7 +96,7 @@ const STATE_EVENTS = [
 	"pairingcode",
 	"pairinguntil",
 	"identitychange",
-	"toolschange",
+	"toolchange",
 	"extensionchange",
 ] as const satisfies readonly (keyof TabMcpEventMap)[];
 
@@ -339,8 +339,8 @@ export function useAllowedTools(grantId: string): AllowedToolsSnapshot {
 	return useSyncExternalStore(subscribe, getSnapshot, getServerSnapshot);
 }
 
-/** Options of `useTool`: `RegisterToolOptions` without the signal (the hook has its own). */
-export type UseToolOptions = Omit<RegisterToolOptions, "signal">;
+/** Options of `useTool`: `ModelContextRegisterToolOptions` without the signal (the hook has its own). */
+export type UseToolOptions = Omit<ModelContextRegisterToolOptions, "signal">;
 
 /**
  * Registers a tool while the component is mounted (with an `AbortSignal`,
@@ -352,7 +352,7 @@ export type UseToolOptions = Omit<RegisterToolOptions, "signal">;
  * from the component's next render, for an error boundary.
  */
 export function useTool<Input extends object = Record<string, unknown>>(
-	tool: Tool<Input>,
+	tool: ModelContextTool<Input>,
 	options: UseToolOptions = {},
 ): void {
 	const mcp = useTabMcp();

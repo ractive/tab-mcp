@@ -4,10 +4,10 @@ import { compileRegistry } from "../src/mcp.ts";
 import { ToolRegistry } from "../src/registry.ts";
 import { toolsFor } from "../src/serve.ts";
 import { appIdOf, TabMcp } from "../src/tab-mcp.ts";
-import type { Tool, ToolCaller } from "../src/types.ts";
+import type { ModelContextTool, ToolCaller } from "../src/types.ts";
 import { MemoryStorage } from "./helpers.ts";
 
-const tool = (over: Partial<Tool> = {}): Tool => ({
+const tool = (over: Partial<ModelContextTool> = {}): ModelContextTool => ({
 	name: "add",
 	description: "Add two numbers",
 	execute: () => 0,
@@ -29,21 +29,85 @@ describe("ToolRegistry (WebMCP rules)", () => {
 	test.each(["", "x".repeat(129), "has space", "slash/name", "ümlaut", "a:b"])(
 		"rejects the name %p",
 		(name) => {
+			// The draft's error (DEC-227).
 			expect(() => new ToolRegistry().register(tool({ name }))).toThrow(
-				TypeError,
+				expect.objectContaining({ name: "InvalidStateError" }),
 			);
 		},
 	);
 
-	test("needs a non-empty description and an execute function", () => {
+	test("an empty description is an InvalidStateError; no name, description or execute a TypeError (DEC-227)", () => {
 		const r = new ToolRegistry();
-		expect(() => r.register(tool({ description: "" }))).toThrow(/description/);
-		expect(() => r.register(tool({ description: "  " }))).toThrow(
-			/description/,
+		expect(() => r.register(tool({ description: "" }))).toThrow(
+			new DOMException(
+				"registerTool: add needs a description",
+				"InvalidStateError",
+			),
 		);
-		expect(() => r.register({ name: "x", description: "d" } as Tool)).toThrow(
-			/execute/,
+		for (const missing of [
+			{ description: "d", execute: () => 0 },
+			{ name: "x", execute: () => 0 },
+		])
+			expect(() => r.register(missing as ModelContextTool)).toThrow(
+				new TypeError("registerTool: a tool needs a name and a description"),
+			);
+		expect(() =>
+			r.register({ name: "x", description: "d" } as ModelContextTool),
+		).toThrow(new TypeError("registerTool: x needs an execute function"));
+		expect(r.list()).toEqual([]);
+	});
+
+	test("name, title and description are converted to strings, as WebIDL does (DEC-227)", () => {
+		const r = new ToolRegistry();
+		r.register(
+			tool({
+				name: 42,
+				title: 7,
+				description: " ",
+			} as never as ModelContextTool),
 		);
+		expect(r.get("42")).toMatchObject({
+			name: "42",
+			title: "7",
+			description: " ",
+		});
+		expect(() =>
+			r.register(tool({ name: Symbol("s") } as never as ModelContextTool)),
+		).toThrow(TypeError);
+		// Once each: a second conversion could give another value.
+		let calls = 0;
+		const description = { toString: () => (calls++ === 0 ? "Adds" : "") };
+		r.register(tool({ name: "once", description } as never));
+		expect(calls).toBe(1);
+		expect(r.get("once")?.description).toBe("Adds");
+	});
+
+	test("the checks come in the draft's order (DEC-227)", () => {
+		const r = new ToolRegistry();
+		r.register(tool());
+		const aborted = AbortSignal.abort(new Error("gone"));
+		// A duplicate before the schema, the description and the signal.
+		expect(() =>
+			r.register(tool({ description: "", inputSchema: { type: "string" } }), {
+				signal: aborted,
+			}),
+		).toThrow(expect.objectContaining({ name: "InvalidStateError" }));
+		// The schema before the signal, the signal before exposedTo.
+		expect(() =>
+			r.register(tool({ name: "b", inputSchema: { type: "string" } }), {
+				signal: aborted,
+			}),
+		).toThrow(TypeError);
+		expect(() =>
+			r.register(tool({ name: "b" }), {
+				signal: aborted,
+				exposedTo: ["http://a.example"],
+			}),
+		).toThrow("gone");
+		// WebIDL's conversion before everything.
+		expect(() =>
+			r.register(tool({ annotations: { readOnlyHint: "yes" } as never })),
+		).toThrow(TypeError);
 	});
 
 	test("inputSchema defaults to { type: object } and must be an object schema", () => {
@@ -379,10 +443,55 @@ describe("ToolRegistry (WebMCP rules)", () => {
 		).toThrow("registerTool: the outputSchema of cyclic must be JSON");
 	});
 
-	test("exposedTo is kept for the native registration", () => {
+	test("exposedTo is kept as origins for the native registration", () => {
 		const r = new ToolRegistry();
-		r.register(tool(), { exposedTo: ["https://a.example"] });
-		expect(r.get("add")?.exposedTo).toEqual(["https://a.example"]);
+		const exposedTo = [
+			"https://a.example/path?q",
+			"wss://b.example",
+			"http://localhost:8080",
+			"http://app.localhost",
+			"http://127.1",
+			"http://[::1]:3000",
+		];
+		r.register(tool(), { exposedTo });
+		exposedTo.push("https://later.example");
+		expect(r.get("add")?.exposedTo).toEqual([
+			"https://a.example",
+			"wss://b.example",
+			"http://localhost:8080",
+			"http://app.localhost",
+			"http://127.0.0.1",
+			"http://[::1]:3000",
+		]);
+	});
+
+	test.each([
+		"http://a.example",
+		"not a url",
+		"data:text/plain,x",
+		"file:///etc/passwd",
+		"ftp://a.example",
+	])(
+		"an exposedTo entry %p that is no potentially trustworthy origin is a SecurityError (DEC-227)",
+		(entry) => {
+			const r = new ToolRegistry();
+			expect(() => r.register(tool(), { exposedTo: [entry] })).toThrow(
+				new DOMException(
+					`registerTool: exposedTo ${JSON.stringify(entry)} is not a potentially trustworthy origin`,
+					"SecurityError",
+				),
+			);
+			expect(r.list()).toEqual([]);
+		},
+	);
+
+	test("an exposedTo that is no list is a TypeError", () => {
+		const r = new ToolRegistry();
+		for (const exposedTo of ["https://a.example", 5, {}])
+			expect(() =>
+				r.register(tool(), { exposedTo: exposedTo as never }),
+			).toThrow(TypeError);
+		expect(r.list()).toEqual([]);
 	});
 
 	test("a hint that is not a boolean is refused, so a consequential tool cannot run without asking (CC 2)", () => {
@@ -419,21 +528,17 @@ describe("ToolRegistry (WebMCP rules)", () => {
 
 	test("callers must list relay, local or webmcp; the list is copied (DEC-165)", () => {
 		const r = new ToolRegistry();
-		for (const callers of ["relay", ["relay", "agents"], [true]]) {
+		for (const callers of [["relay", "agents"], [true]]) {
 			expect(() => r.register(tool(), { callers: callers as never })).toThrow(
 				new TypeError(
-					'registerTool: callers must be "relay", "local" or "webmcp"; option webmcp is gone',
+					'registerTool: callers must be "relay", "local" or "webmcp"',
 				),
 			);
 		}
-		// The option `callers` replaced is refused, not ignored (review of PR 129):
-		// an ignored `webmcp: false` would put the tool into WebMCP.
-		for (const webmcp of [false, true, undefined]) {
-			expect(() => r.register(tool(), { webmcp } as never)).toThrow(
-				/option webmcp is gone/,
-			);
-		}
-		// Not a list at all: the copy throws the TypeError.
+		// Not a list at all.
+		expect(() => r.register(tool(), { callers: "relay" as never })).toThrow(
+			new TypeError("registerTool: callers must be a list"),
+		);
 		expect(() => r.register(tool(), { callers: {} as never })).toThrow(
 			TypeError,
 		);
@@ -482,19 +587,23 @@ describe("TabMcp.registerTool", () => {
 		const m = mcp();
 		await m.registerTool(tool());
 		expect(m.tools).toEqual(["add"]);
-		await expect(m.registerTool(tool({ name: "" }))).rejects.toBeInstanceOf(
-			TypeError,
+		await expect(m.registerTool(tool({ name: "" }))).rejects.toHaveProperty(
+			"name",
+			"InvalidStateError",
 		);
+		await expect(
+			m.registerTool({ name: "x" } as ModelContextTool),
+		).rejects.toBeInstanceOf(TypeError);
 		await expect(m.registerTool(tool())).rejects.toHaveProperty(
 			"name",
 			"InvalidStateError",
 		);
 	});
 
-	test("emits toolschange", async () => {
+	test("emits toolchange", async () => {
 		const m = mcp();
 		const seen: string[][] = [];
-		m.addEventListener("toolschange", (e) => seen.push([...e.detail.tools]));
+		m.addEventListener("toolchange", (e) => seen.push([...e.detail.tools]));
 		const c = new AbortController();
 		await m.registerTool(tool(), { signal: c.signal });
 		c.abort();

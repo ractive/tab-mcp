@@ -6,7 +6,10 @@
  */
 
 import { describe, expect, test } from "bun:test";
-import type { Tool, ToolExecuteOptions } from "@ractive-ch/tab-mcp-client";
+import type {
+	ModelContextTool,
+	ToolExecuteCallbackOptions,
+} from "@ractive-ch/tab-mcp-client";
 import { Window as HappyWindow } from "happy-dom";
 import { pageHistory } from "../src/content.ts";
 import type { PageHistory, PageInfo } from "../src/messages.ts";
@@ -481,7 +484,7 @@ const CLIENT = {
 	host: "claude.ai",
 };
 
-function execOptions(): ToolExecuteOptions {
+function execOptions(): ToolExecuteCallbackOptions {
 	return { signal: new AbortController().signal, client: CLIENT };
 }
 
@@ -502,7 +505,8 @@ function tools(
 			refreshed++;
 		},
 	);
-	const byName = (name: string) => list.find((t) => t.name === name) as Tool;
+	const byName = (name: string) =>
+		list.find((t) => t.name === name) as ModelContextTool;
 	const call = (name: string, args: Record<string, unknown> = {}) =>
 		byName(name).execute(args, execOptions()) as Promise<unknown>;
 	return { list, asked, call, refreshed: () => refreshed };
@@ -730,7 +734,9 @@ describe("the navigation tools", () => {
 			},
 			async () => {},
 		);
-		const navigate = list.find((t) => t.name === "navigate") as Tool;
+		const navigate = list.find(
+			(t) => t.name === "navigate",
+		) as ModelContextTool;
 		await expect(
 			navigate.execute(
 				{ url: "https://other.test/" },
@@ -760,7 +766,9 @@ describe("the navigation tools", () => {
 			},
 			async () => {},
 		);
-		const navigate = list.find((t) => t.name === "navigate") as Tool;
+		const navigate = list.find(
+			(t) => t.name === "navigate",
+		) as ModelContextTool;
 		await expect(
 			navigate.execute(
 				{ url: "https://other.test/" },
@@ -779,7 +787,7 @@ describe("the navigation tools", () => {
 				return "allow";
 			},
 			async () => {},
-		).find((t) => t.name === "navigate") as Tool;
+		).find((t) => t.name === "navigate") as ModelContextTool;
 		await expect(
 			none.execute(
 				{ url: "https://other.test/" },
@@ -811,7 +819,7 @@ describe("the navigation tools", () => {
 			},
 			async () => "allow",
 			async () => {},
-		).find((x) => x.name === "navigate") as Tool;
+		).find((x) => x.name === "navigate") as ModelContextTool;
 		expect(
 			await (t.execute(
 				{ url: `${SHOP}/sale` },
@@ -832,7 +840,9 @@ describe("the navigation tools", () => {
 			history: history(),
 		});
 		const t = tools(chrome);
-		const navigate = t.list.find((x) => x.name === "navigate") as Tool;
+		const navigate = t.list.find(
+			(x) => x.name === "navigate",
+		) as ModelContextTool;
 		await expect(
 			navigate.execute(
 				{ url: "https://other.test/" },

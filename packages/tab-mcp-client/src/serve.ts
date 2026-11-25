@@ -27,7 +27,7 @@ import type {
 } from "./types.ts";
 
 /**
- * The tools that callers of `kind` see (`RegisterToolOptions.callers`): to
+ * The tools that callers of `kind` see (`ModelContextRegisterToolOptions.callers`): to
  * the others a tool they cannot see does not exist, in `tools/list` and in
  * `tools/call` alike. Without `callers`, the relay and a port see every tool.
  * The rule for WebMCP lives in the core's `mirror` (webmcp.ts), and WebMCP

@@ -175,7 +175,7 @@ export interface ServeHandle {
 }
 
 /** Second argument of `execute`. */
-export interface ToolExecuteOptions {
+export interface ToolExecuteCallbackOptions {
 	/**
 	 * Aborted when the caller gives up on the call or the page disconnects
 	 * (a WebMCP call: when the browser cancels it).
@@ -190,7 +190,9 @@ export interface ToolExecuteOptions {
  * types `execute`'s first argument; the library checks the arguments against
  * `inputSchema` before it calls `execute`, so keep the two in step.
  */
-export interface Tool<Input extends object = Record<string, unknown>> {
+export interface ModelContextTool<
+	Input extends object = Record<string, unknown>,
+> {
 	/** 1–128 characters of `A–Z a–z 0–9 _ - .`. */
 	name: string;
 	title?: string;
@@ -206,15 +208,15 @@ export interface Tool<Input extends object = Record<string, unknown>> {
 	 */
 	outputSchema?: JsonSchema;
 	/** Runs the tool. Its return value becomes the result (DEC-023). */
-	execute: (input: Input, options: ToolExecuteOptions) => unknown;
+	execute: (input: Input, options: ToolExecuteCallbackOptions) => unknown;
 	annotations?: ToolAnnotations;
 }
 
-/** A kind of caller (`ToolCallClient.kind`), for `RegisterToolOptions.callers`. */
+/** A kind of caller (`ToolCallClient.kind`), for `ModelContextRegisterToolOptions.callers`. */
 export type ToolCaller = ToolCallClient["kind"];
 
 /** Options of `registerTool`. */
-export interface RegisterToolOptions {
+export interface ModelContextRegisterToolOptions {
 	/**
 	 * Aborting it unregisters the tool. Already aborted: `registerTool`
 	 * rejects with its reason and registers nothing (as WebMCP).
@@ -684,7 +686,7 @@ export interface TabMcpEventMap {
 		identity: IdentityState;
 		identityMessage: string | undefined;
 	}>;
-	toolschange: CustomEvent<{ tools: readonly string[] }>;
+	toolchange: CustomEvent<{ tools: readonly string[] }>;
 	/** `extension` changed: the tab-mcp browser extension, its AI apps (DEC-207). */
 	extensionchange: CustomEvent<{ extension: BrowserExtension | undefined }>;
 	/** An AI app called a tool (before any confirmation). */

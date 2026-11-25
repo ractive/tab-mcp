@@ -6,6 +6,40 @@ the Git tag `client-v<version>`. The format follows
 [Semantic Versioning](https://semver.org/). The relay has its own
 [changelog](https://github.com/ractive/tab-mcp/blob/main/packages/tab-mcp/CHANGELOG.md).
 
+## Unreleased
+
+### Breaking
+
+`registerTool` is the WebMCP draft's `registerTool` (of 24 November 2026) as far as it
+costs nothing (DEC-227): its names, its checks in its order, its errors.
+
+- **Names.** The types are the draft's: `Tool` is `ModelContextTool`,
+  `RegisterToolOptions` is `ModelContextRegisterToolOptions`, `ToolExecuteOptions` is
+  `ToolExecuteCallbackOptions`. The event `toolschange` is `toolchange` (its detail is
+  still `{ tools }`).
+- **Errors.** A name that breaks the rules and an empty description reject with an
+  `InvalidStateError`, as a duplicate already did (they were `TypeError`s). A missing
+  `name` or `description` is a `TypeError`. A description of only spaces is accepted,
+  as the draft accepts it. A duplicate is found before the schemas are checked, and the
+  schemas before an aborted `signal`, as in the draft.
+- **WebIDL's conversions.** `name`, `title` and `description` are converted to strings
+  (`42` is `"42"`; a `title` of another type was a `TypeError`). `annotations: null`
+  means no hints. An `exposedTo` or `callers` that is a string or `null` is a
+  `TypeError`.
+- **`exposedTo` is checked.** An entry that is not a potentially trustworthy origin
+  (`https:`, `wss:`, or a loopback host such as `http://localhost`) rejects the
+  registration with a `SecurityError`, on every caller's side; until now the tool was
+  registered and only its WebMCP mirror failed, with a console warning. The library keeps
+  the origins (`https://a.example/page` is `https://a.example`) and passes those on.
+- **`webmcp` in `registerTool`'s options**, the option of 0.15 and before, is no longer
+  refused: it is ignored like any other unknown option.
+
+Unchanged, and still where the library differs from the draft: schemas need
+`"type": "object"`, a hint that is not a boolean is a `TypeError` (the draft would make
+`readOnlyHint: "false"` true), arguments are checked against `inputSchema`, `execute`
+gets `client` and may return an MCP result, `callers`, and the events `toolcall` and
+`toolcallend`.
+
 ## [0.24.0][client-0.24.0] - 2026-11-23
 
 ### Added

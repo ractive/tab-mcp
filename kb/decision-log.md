@@ -5893,3 +5893,48 @@ it's such a detail".
 - **Rejected:** the list in every state (up to 100 entries on each state change);
   `chrome.storage.session` (survives a worker restart, but is storage, and would want a
   line in the policy); the results (other people's data, and large).
+
+## DEC-227: `registerTool` is the WebMCP draft's where it costs nothing (owner)
+
+2026-11-25. The owner asked whether the library should keep its own way of offering
+tools or become a WebMCP polyfill. The answer was to keep `TabMcp.registerTool` (a
+polyfill would put every relay tool into WebMCP, where the library asks no caller,
+DEC-215; Chrome's `getTools()`/`executeTool()` drop `outputSchema` and turn results
+into strings; and three parties already compete for `document.modelContext`), and
+instead to remove the differences from the draft that cost nothing. The owner: "Do that.
+Maybe also adapt the naming etc. Don't be backwards compatible."
+
+Against the draft of 24 November 2026 (`registerTool` steps, WebIDL of
+`ModelContextTool` and `ModelContextRegisterToolOptions`):
+
+- **Names:** the types are `ModelContextTool`, `ModelContextRegisterToolOptions` and
+  `ToolExecuteCallbackOptions` (`ToolAnnotations` already was); the event `toolschange`
+  is `toolchange`, as the draft's. No aliases (no backwards compatibility).
+- **Errors and order:** WebIDL's conversion first (`TypeError`: no object, no `name`,
+  `description` or `execute`, `annotations` no object, `exposedTo` or `callers` no
+  list), then a duplicate, a bad name, an empty description (each an
+  `InvalidStateError`), the schemas, a duplicate again (a schema's `toJSON` may have
+  registered one), an aborted signal, then `exposedTo` (`SecurityError`).
+- **Conversions:** `name`, `title`, `description` become strings as WebIDL makes them
+  (a `Symbol` is a `TypeError`); only the empty description is refused, not one of
+  spaces; `annotations: null` is no hints.
+- **`exposedTo`:** each entry must parse as a URL with a potentially trustworthy
+  origin: `https:` or `wss:`, or a host `127.x.x.x`, `[::1]`, `localhost` or
+  `*.localhost` (opaque origins, `file:` among them, are refused, as the draft's "is
+  origin potentially trustworthy?" refuses them). The registry keeps the origins and
+  the mirror passes them on, so its warning about a tool that asks compares origins
+  directly.
+- **Kept, because they cost something:** `"type": "object"` schemas (MCP), refusing a
+  hint that is not a boolean (WebIDL would make `readOnlyHint: "false"` true and a tool
+  that asks would run unasked, CC 2), checking the arguments, `client` and MCP results in
+  `execute`, `callers`, a promise that settles at once, `mcp.tools` rather than an async
+  `getTools()`, and `toolcall`/`toolcallend` rather than `toolactivated`/`toolcancel`
+  (they fire before the question, for every caller, with the caller and the outcome:
+  the draft's names would promise its meaning).
+- **Dropped:** the refusal of `webmcp` in `registerTool`'s options (the option of 0.15,
+  DEC-165): an unknown option is ignored like any other.
+- **Size:** the checks cost about 200 bytes gzipped: the core's limit is 6.5 KB (was
+  6.25 KB), the React closure's 13.75 KB (was 13.5 KB).
+- **Not here:** the tab-mcp browser extension's own `document.modelContext` (Firefox,
+  Chrome without WebMCP) copies Chrome 156, not the draft; moving it to the draft is its
+  own change.

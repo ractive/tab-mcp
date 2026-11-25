@@ -31,8 +31,8 @@ import {
 } from "@cfworker/json-schema";
 import type {
 	ConfirmRequest,
-	Tool,
-	ToolExecuteOptions,
+	ModelContextTool,
+	ToolExecuteCallbackOptions,
 } from "@ractive-ch/tab-mcp-client";
 import { canonicalJson } from "../canonical.ts";
 import type {
@@ -490,7 +490,10 @@ export interface BridgeChrome {
 
 /** Where the bridged tools go: the connection's `TabMcp`. */
 export interface Registrar {
-	registerTool(tool: Tool, options: { signal: AbortSignal }): Promise<void>;
+	registerTool(
+		tool: ModelContextTool,
+		options: { signal: AbortSignal },
+	): Promise<void>;
 }
 
 /** The page tool a question is about. */
@@ -693,7 +696,7 @@ export class PageToolBridge {
 	async callByName(
 		name: string,
 		args: unknown,
-		options: ToolExecuteOptions,
+		options: ToolExecuteCallbackOptions,
 	): Promise<unknown> {
 		// A page that does not answer is given up by the read itself; the AI
 		// app's cancel ends the wait too.
@@ -731,7 +734,7 @@ export class PageToolBridge {
 	async #allowedThenRun(
 		callable: Callable,
 		input: unknown,
-		options: ToolExecuteOptions,
+		options: ToolExecuteCallbackOptions,
 	): Promise<unknown> {
 		const { target } = callable;
 		const { client } = options;
@@ -785,7 +788,7 @@ export class PageToolBridge {
 	async #run(
 		callable: Callable,
 		input: unknown,
-		options: ToolExecuteOptions,
+		options: ToolExecuteCallbackOptions,
 		vouch?: Vouch,
 	): Promise<unknown> {
 		const { target } = callable;
@@ -877,7 +880,7 @@ export class PageToolBridge {
 		this.#retried = false;
 		if (this.#stopped) return;
 		const offered: Offered[] = [];
-		const wanted: { name: string; key: string; tool: Tool }[] = [];
+		const wanted: { name: string; key: string; tool: ModelContextTool }[] = [];
 		const callable = new Map<string, Callable>();
 		const compiled = new Map<string, Compiled>();
 		let more = tools.more;
@@ -981,7 +984,7 @@ export class PageToolBridge {
 
 	/** Make the registered tools those of `wanted`. */
 	#offer(
-		wanted: { name: string; key: string; tool: Tool }[],
+		wanted: { name: string; key: string; tool: ModelContextTool }[],
 		offered: Offered[] = [],
 	): void {
 		const keys = new Map(wanted.map((w) => [w.name, w.key]));
@@ -1032,7 +1035,7 @@ export class PageToolBridge {
 		callable: Callable,
 		name: string,
 		schema: Record<string, unknown>,
-	): Tool {
+	): ModelContextTool {
 		return {
 			name,
 			title: callable.title,

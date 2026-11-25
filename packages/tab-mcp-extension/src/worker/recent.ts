@@ -21,7 +21,7 @@
  */
 
 import type {
-	Tool,
+	ModelContextTool,
 	ToolCallClient,
 	ToolCallEnd,
 	ToolCallStart,
@@ -328,7 +328,7 @@ export class RecentCalls {
 	}
 
 	/** `tool` with an `execute` that binds its call first. */
-	wrap(tool: Tool): Tool {
+	wrap(tool: ModelContextTool): ModelContextTool {
 		return {
 			...tool,
 			execute: (input, options) => {

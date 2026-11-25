@@ -7,8 +7,8 @@ import { describe, expect, test } from "bun:test";
 import { Validator } from "@cfworker/json-schema";
 import type {
 	ConfirmRequest,
-	Tool,
-	ToolExecuteOptions,
+	ModelContextTool,
+	ToolExecuteCallbackOptions,
 } from "@ractive-ch/tab-mcp-client";
 import { canonicalJson } from "../src/canonical.ts";
 import { callTool, pageTools } from "../src/content.ts";
@@ -791,11 +791,14 @@ describe("results", () => {
 });
 
 /** A registrar like `TabMcp`: tools by name, gone when their signal aborts. */
-function registrar(refuse: (tool: Tool) => boolean = () => false) {
-	const tools = new Map<string, Tool>();
+function registrar(refuse: (tool: ModelContextTool) => boolean = () => false) {
+	const tools = new Map<string, ModelContextTool>();
 	return {
 		tools,
-		async registerTool(tool: Tool, options: { signal: AbortSignal }) {
+		async registerTool(
+			tool: ModelContextTool,
+			options: { signal: AbortSignal },
+		) {
 			if (refuse(tool)) throw new TypeError(`refused ${tool.name}`);
 			if (tools.has(tool.name)) throw new Error(`duplicate ${tool.name}`);
 			tools.set(tool.name, tool);
@@ -878,7 +881,7 @@ const client = {
 };
 const options = (
 	signal = new AbortController().signal,
-): ToolExecuteOptions => ({
+): ToolExecuteCallbackOptions => ({
 	signal,
 	client,
 });
@@ -1331,7 +1334,7 @@ describe("PageToolBridge", () => {
 	test("a page's error and a refusal stay cut at MAX_ERROR, not at the descriptions' limit", async () => {
 		expect(MAX_ERROR).toBe(1000);
 		const reg = {
-			async registerTool(tool: Tool) {
+			async registerTool(tool: ModelContextTool) {
 				if (tool.name === "page_refused") throw new TypeError("r".repeat(5000));
 			},
 		};
@@ -1531,7 +1534,7 @@ describe("PageToolBridge", () => {
 		const reg = registrar();
 		let registrations = 0;
 		const counting = {
-			registerTool: (tool: Tool, opts: { signal: AbortSignal }) => {
+			registerTool: (tool: ModelContextTool, opts: { signal: AbortSignal }) => {
 				registrations++;
 				return reg.registerTool(tool, opts);
 			},

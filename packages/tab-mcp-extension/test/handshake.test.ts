@@ -13,7 +13,7 @@ import {
 	type Grant,
 	TabMcp,
 	type ToolCallStart,
-	type ToolExecuteOptions,
+	type ToolExecuteCallbackOptions,
 } from "@ractive-ch/tab-mcp-client";
 import { Window } from "happy-dom";
 import {
@@ -741,7 +741,7 @@ describe("the vouch in the bridge", () => {
 		available: true,
 		tools,
 	});
-	const options = (): ToolExecuteOptions => ({
+	const options = (): ToolExecuteCallbackOptions => ({
 		signal: new AbortController().signal,
 		client: {
 			kind: "relay",

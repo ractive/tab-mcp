@@ -12,9 +12,9 @@
 import {
 	type ConfirmRequest,
 	type Icon,
+	type ModelContextTool,
 	type ReplacedDetail,
 	TabMcp,
-	type Tool,
 } from "@ractive-ch/tab-mcp-client";
 import {
 	CodeFiller,
@@ -189,7 +189,10 @@ export function panelStatus(s: StatusInput): PanelState["status"] {
  * A navigation tool whose call "Recent calls" names with the site of the
  * tab in front as it starts, the tab it acts on (DEC-226).
  */
-function withSite(tool: Tool, recent: RecentCalls): Tool {
+function withSite(
+	tool: ModelContextTool,
+	recent: RecentCalls,
+): ModelContextTool {
 	return {
 		...tool,
 		execute: (input, options) => {

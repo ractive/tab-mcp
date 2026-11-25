@@ -11,7 +11,10 @@
  * with why the extension may not read it.
  */
 
-import type { Tool, ToolExecuteOptions } from "@ractive-ch/tab-mcp-client";
+import type {
+	ModelContextTool,
+	ToolExecuteCallbackOptions,
+} from "@ractive-ch/tab-mcp-client";
 import { FIREFOX, PANEL } from "../browser.ts";
 import type { PageHistory, PageInfo } from "../messages.ts";
 import type { Answer } from "../protocol.ts";
@@ -332,7 +335,7 @@ async function askFirst(
 	ask: AskNavigation,
 	name: string,
 	args: Record<string, unknown>,
-	options: ToolExecuteOptions,
+	options: ToolExecuteCallbackOptions,
 	tab: TargetTab,
 	from: string | undefined,
 	target: Target,
@@ -392,7 +395,7 @@ async function navigation(
 	kind: Kind,
 	name: string,
 	args: Record<string, unknown>,
-	options: ToolExecuteOptions,
+	options: ToolExecuteCallbackOptions,
 	chrome: NavigationChrome,
 	ask: AskNavigation,
 	refresh: () => Promise<void>,
@@ -457,7 +460,7 @@ export function navigationTools(
 	chrome: NavigationChrome,
 	ask: AskNavigation,
 	refresh: () => Promise<void>,
-): Tool[] {
+): ModelContextTool[] {
 	// They change what the tab shows (and a GET can change things on a
 	// site): not read-only. Not consequential either: the extension asks
 	// itself, for another origin only. The result carries the page's title.
@@ -469,7 +472,7 @@ export function navigationTools(
 	} as const;
 	const run =
 		(kind: Kind, name: string) =>
-		(args: Record<string, unknown>, options: ToolExecuteOptions) =>
+		(args: Record<string, unknown>, options: ToolExecuteCallbackOptions) =>
 			navigation(kind, name, args ?? {}, options, chrome, ask, refresh);
 	return [
 		{

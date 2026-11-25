@@ -8,9 +8,9 @@
 
 import { afterAll, describe, expect, spyOn, test } from "bun:test";
 import {
+	type ModelContextTool,
 	TabMcp,
-	type Tool,
-	type ToolExecuteOptions,
+	type ToolExecuteCallbackOptions,
 } from "@ractive-ch/tab-mcp-client";
 import type { PagePort } from "@ractive-ch/tab-mcp-client/extension";
 import type { ExtensionState, PageTool, PageTools } from "../src/messages.ts";
@@ -292,7 +292,7 @@ const connected = spyOn(TabMcp.prototype, "connect");
  */
 function callTool(name: string, args: Record<string, unknown> = {}) {
 	const tool = registered.mock.calls
-		.map(([t]) => t as Tool)
+		.map(([t]) => t as ModelContextTool)
 		.findLast((t) => t.name === name);
 	if (tool === undefined) throw new Error(`no tool ${name} registered`);
 	return Promise.resolve(
@@ -304,7 +304,7 @@ function callTool(name: string, args: Record<string, unknown> = {}) {
 				name: "Claude",
 				host: "claude.ai",
 			},
-		} as ToolExecuteOptions),
+		} as ToolExecuteCallbackOptions),
 	);
 }
 

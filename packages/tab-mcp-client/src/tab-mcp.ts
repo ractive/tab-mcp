@@ -20,9 +20,10 @@ import type {
 	Grant,
 	IdentityAssertionHandler,
 	IdentityState,
+	ModelContextRegisterToolOptions,
+	ModelContextTool,
 	PairingCode,
 	ReconnectingInfo,
-	RegisterToolOptions,
 	RelayClient,
 	ServeHandle,
 	ServeOptions,
@@ -30,7 +31,6 @@ import type {
 	SessionInfo,
 	TabMcpEventMap,
 	TabMcpOptions,
-	Tool,
 	ToolCallClient,
 	TunnelPort,
 } from "./types.ts";
@@ -335,7 +335,7 @@ export class TabMcp extends EventTarget {
 			this.#tabs = options.storage === null ? undefined : `${key}#tabs`;
 		}
 		this.#registry.onChange(() =>
-			this.#emit("toolschange", { tools: this.tools }),
+			this.#emit("toolchange", { tools: this.tools }),
 		);
 		// Also through the browser's own WebMCP, where it has it (DEC-115):
 		// every tool whose `callers` do not leave "webmcp" out (DEC-209). The getter
@@ -386,12 +386,12 @@ export class TabMcp extends EventTarget {
 	 * the rejection (DEC-010).
 	 */
 	registerTool<Input extends object = Record<string, unknown>>(
-		tool: Tool<Input>,
-		options: RegisterToolOptions = {},
+		tool: ModelContextTool<Input>,
+		options: ModelContextRegisterToolOptions = {},
 	): Promise<void> {
 		try {
 			// The arguments are checked against `inputSchema` before `execute` runs.
-			this.#registry.register(tool as unknown as Tool, options);
+			this.#registry.register(tool as unknown as ModelContextTool, options);
 		} catch (error) {
 			return Promise.reject(error);
 		}
