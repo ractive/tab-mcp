@@ -5968,3 +5968,19 @@ another tab; for 750 ms the switches were flat and grey (DEC-160), which reads a
 - A later change of the same tab's tools (`toolchange`, a navigation, a reload) waits in
   the disabled look as before (DEC-160: flat, no opacity), so a click that did nothing
   there is explained.
+
+## DEC-234: "This page offers no WebMCP tools" is a framed note (owner)
+
+2026-11-26. The owner asked for the hint to be more prominent. It was one muted 12 px
+line under the tab's badges, the same as the lines around it, and was easy to miss on a
+page that can be read but offers nothing.
+
+- `#no-tools` is now a note (`.tab-note`): a `--wash` fill with a 1 px `--edge` and the
+  notice's radius, its first sentence in bold `--ink`, then "page_info and the
+  navigation tools still work." muted and small. Every pair is in the contrast tables
+  already (`--ink`, `--ink-2` and `--edge` on `--wash`).
+- Not the warning notice of `#tab-access`: that one says the tab cannot be read and
+  gives the way out. A page without tools is not a fault, and the warning colours stay
+  for what needs doing.
+- `#no-webmcp` and `#late-webmcp` stay muted lines: they are longer explanations and
+  come with their own conditions.

@@ -454,6 +454,11 @@ describe("the tab card's texts", () => {
 			expect(text("late-webmcp")).toContain("after it had loaded");
 			expect(text("late-webmcp")).toContain("With access to all sites");
 			expect(text("no-tools")).toContain("page_info and the navigation tools");
+			// A framed note, its first sentence in bold (DEC-234).
+			expect(doc.getElementById("no-tools")?.className).toBe("tab-note");
+			expect(doc.querySelector("#no-tools strong")?.textContent).toBe(
+				"This page offers no WebMCP tools.",
+			);
 			// The chat in a tab of this profile (EQ 2).
 			expect(text("pairing")).toContain("outside this Chrome profile");
 			// The look (DEC-160, DEC-161): the main actions are ink ("strong"),
