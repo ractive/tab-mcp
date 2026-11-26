@@ -9,7 +9,7 @@
  * byte for byte, as before.
  */
 
-import { type RpcId, sseEvent } from "../exchange.ts";
+import type { RpcId } from "../exchange.ts";
 import type { GroupMode, GroupPin } from "../protocol.ts";
 
 /** The `_meta` key of a group grant's results that names the member that answered. */
@@ -57,10 +57,31 @@ export function shownTab(tab: string): string {
 	return JSON.stringify(tab.slice(0, MAX_SHOWN_TAB));
 }
 
+/**
+ * The tab-mcp browser extension's own tools that take a `tab` argument
+ * (DEC-230): only theirs is the extension's tab id. Every other tool's
+ * arguments are someone else's: a `page_<name>` tool's are the web page's
+ * own input schema, where a `tab` may mean anything.
+ */
+export const TAB_TOOLS: ReadonlySet<string> = new Set([
+	"page_info",
+	"webmcp_tools",
+	"webmcp_call",
+	"navigate",
+	"go_back",
+	"go_forward",
+	"reload",
+	"use_tab",
+]);
+
 /** A `tools/call` request: its tool name and its `tab` argument, if it has one. */
 export interface ToolCall {
 	name: string;
-	/** The `tab` argument as sent (any JSON value); `undefined` if there is none. */
+	/**
+	 * The `tab` argument as sent (any JSON value), for the extension's tools
+	 * that take one (`TAB_TOOLS`); `undefined` if there is none, and always for
+	 * any other tool.
+	 */
 	tab: unknown;
 }
 
@@ -71,21 +92,126 @@ export function toolCall(body: Json): ToolCall | undefined {
 	if (!isObject(params) || typeof params["name"] !== "string") {
 		return undefined;
 	}
+	const name = params["name"];
 	const args = params["arguments"];
 	return {
-		name: params["name"],
-		tab: isObject(args) ? args["tab"] : undefined,
+		name,
+		tab: TAB_TOOLS.has(name) && isObject(args) ? args["tab"] : undefined,
 	};
 }
 
-/** The request body with its `tab` argument set to `tab` (a tool call's). */
-export function withTab(body: Json, tab: string): string {
-	const params = body["params"] as Json;
-	const args = params["arguments"] as Json;
-	return JSON.stringify({
-		...body,
-		params: { ...params, arguments: { ...args, tab } },
-	});
+// Editing JSON text in place: the relay changes a few bytes of a body and
+// keeps every other byte as it came, so that nothing passes through
+// JSON.parse and JSON.stringify (which round integers above 2^53 and turn
+// 1e400 into null). The body was parsed once already, so it is valid JSON.
+
+/** Where a value is in a JSON text: from `start` to before `end`. */
+interface Span {
+	start: number;
+	end: number;
+}
+
+function skipSpace(t: string, i: number): number {
+	let j = i;
+	while (j < t.length && " \t\n\r".includes(t[j] ?? "")) j++;
+	return j;
+}
+
+/** The end of the string that starts at `i` (its opening quote). */
+function stringEnd(t: string, i: number): number {
+	let j = i + 1;
+	while (j < t.length) {
+		const c = t[j];
+		if (c === "\\") j += 2;
+		else if (c === '"') return j + 1;
+		else j++;
+	}
+	throw new SyntaxError("unterminated string");
+}
+
+const SCALAR = /-?\d+(?:\.\d+)?(?:[eE][+-]?\d+)?|true|false|null/y;
+
+/** The end of the JSON value that starts at `i`. */
+function valueEnd(t: string, i: number): number {
+	const c = t[i];
+	if (c === '"') return stringEnd(t, i);
+	if (c === "{" || c === "[") {
+		const close = c === "{" ? "}" : "]";
+		let j = skipSpace(t, i + 1);
+		if (t[j] === close) return j + 1;
+		for (;;) {
+			if (c === "{") {
+				j = skipSpace(t, stringEnd(t, j));
+				if (t[j] !== ":") throw new SyntaxError("expected :");
+				j = skipSpace(t, j + 1);
+			}
+			j = skipSpace(t, valueEnd(t, j));
+			if (t[j] === ",") j = skipSpace(t, j + 1);
+			else if (t[j] === close) return j + 1;
+			else throw new SyntaxError("expected , or a closing bracket");
+		}
+	}
+	SCALAR.lastIndex = i;
+	if (SCALAR.exec(t) === null) throw new SyntaxError("not a value");
+	return SCALAR.lastIndex;
+}
+
+/** The value of `key` in the object at `span`: the last one, as JSON.parse takes it. */
+function member(t: string, span: Span, key: string): Span | undefined {
+	if (t[span.start] !== "{") return undefined;
+	let found: Span | undefined;
+	let j = skipSpace(t, span.start + 1);
+	if (t[j] === "}") return undefined;
+	for (;;) {
+		const keyEnd = stringEnd(t, j);
+		const name: unknown = JSON.parse(t.slice(j, keyEnd));
+		j = skipSpace(t, skipSpace(t, keyEnd) + 1);
+		const end = valueEnd(t, j);
+		if (name === key) found = { start: j, end };
+		j = skipSpace(t, end);
+		if (t[j] !== ",") return found;
+		j = skipSpace(t, j + 1);
+	}
+}
+
+/** The value at `path` in a JSON text, or `undefined`. */
+function at(t: string, path: string[]): Span | undefined {
+	const start = skipSpace(t, 0);
+	let span: Span | undefined = { start, end: valueEnd(t, start) };
+	for (const key of path) {
+		span = span === undefined ? undefined : member(t, span, key);
+	}
+	return span;
+}
+
+/** Whether the object or array at `span` is empty. */
+function empty(t: string, span: Span): boolean {
+	return skipSpace(t, span.start + 1) === span.end - 1;
+}
+
+/** `t` with each text inserted at its index (none of them the same). */
+function insert(t: string, inserts: { at: number; text: string }[]): string {
+	let out = t;
+	for (const i of [...inserts].sort((a, b) => b.at - a.at)) {
+		out = out.slice(0, i.at) + i.text + out.slice(i.at);
+	}
+	return out;
+}
+
+/**
+ * The request text with its `tab` argument set to `tab`, every other byte
+ * as it came; `undefined` if the text has no string `tab` argument there.
+ */
+export function withTab(text: string, tab: string): string | undefined {
+	try {
+		const span = at(text, ["params", "arguments", "tab"]);
+		if (span === undefined || text[span.start] !== '"') return undefined;
+		return (
+			text.slice(0, span.start) + JSON.stringify(tab) + text.slice(span.end)
+		);
+	} catch {
+		return undefined;
+	}
 }
 
 /** A tool result with `isError` and one text: what the relay answers for a call it cannot route. */
@@ -200,7 +326,7 @@ class EventSplitter {
 export async function editResponse(
 	response: Response,
 	rpcId: RpcId | undefined,
-	edit: (message: Json) => Json,
+	edit: (text: string, message: Json) => string,
 ): Promise<Response> {
 	const type = (response.headers.get("content-type") ?? "").toLowerCase();
 	const headers = new Headers(response.headers);
@@ -216,7 +342,7 @@ export async function editResponse(
 			return new Response(text, init);
 		}
 		return new Response(
-			isResponseTo(value, rpcId) ? JSON.stringify(edit(value)) : text,
+			isResponseTo(value, rpcId) ? edit(text, value) : text,
 			init,
 		);
 	}
@@ -239,9 +365,10 @@ export async function editResponse(
 				} catch {
 					value = undefined;
 				}
-				if (isResponseTo(value, rpcId)) {
+				if (data !== undefined && isResponseTo(value, rpcId)) {
 					edited = true;
-					out = sseEvent(JSON.stringify(edit(value)));
+					const changed = edit(data, value);
+					if (changed !== data) out = withData(event.lines, changed);
 				}
 			}
 			controller.enqueue(encoder.encode(out));
@@ -295,6 +422,25 @@ export function findResponse(
 	return undefined;
 }
 
+/**
+ * An event with new data: its other lines as they were, the data lines
+ * replaced where the first one stood.
+ */
+function withData(lines: string[], data: string): string {
+	let out = "";
+	let written = false;
+	for (const line of lines) {
+		const name = line.startsWith(":") ? "" : line.split(":", 1)[0];
+		if (name !== "data") {
+			out += `${line}\n`;
+		} else if (!written) {
+			written = true;
+			for (const d of data.split(/\r\n|\r|\n/)) out += `data: ${d}\n`;
+		}
+	}
+	return `${out}\n`;
+}
+
 /** Who answered a group grant's request, and what the AI app reads about it. */
 export interface AnsweredBy {
 	member: string;
@@ -304,27 +450,49 @@ export interface AnsweredBy {
 }
 
 /**
- * A response with the member that answered named: a tool result gets a
- * last text (`text`), every result `_meta` with the member. The result's
- * other content and its `structuredContent` stay as they are, so an output
- * schema still holds. An error passes unchanged.
+ * A response's text with the member that answered named: a tool result
+ * gets a last text (`who.text`) at the end of `content`, every result a
+ * `_meta` key with the member, both inserted into the text. Every other
+ * byte is the member's, `structuredContent` included, so an output schema
+ * still holds and no number changes. An error, or a result of a shape the
+ * relay does not expect, passes unchanged.
  */
 export function nameMember(
-	message: Json,
+	text: string,
 	toolResultToo: boolean,
 	who: AnsweredBy,
-): Json {
-	const result = message["result"];
-	if (!isObject(result)) return message;
-	const out: Json = { ...result };
-	if (toolResultToo && Array.isArray(out["content"])) {
-		out["content"] = [...out["content"], { type: "text", text: who.text }];
+): string {
+	try {
+		const result = at(text, ["result"]);
+		if (result === undefined || text[result.start] !== "{") return text;
+		const inserts: { at: number; text: string }[] = [];
+		if (toolResultToo) {
+			const content = member(text, result, "content");
+			if (content === undefined || text[content.start] !== "[") return text;
+			inserts.push({
+				at: content.end - 1,
+				text: `${empty(text, content) ? "" : ","}${JSON.stringify({ type: "text", text: who.text })}`,
+			});
+		}
+		const entry = `${JSON.stringify(ANSWERED_BY_META)}:${JSON.stringify({ member: who.member, label: who.label })}`;
+		const meta = member(text, result, "_meta");
+		if (meta === undefined) {
+			inserts.push({
+				at: result.end - 1,
+				text: `${empty(text, result) ? "" : ","}"_meta":{${entry}}`,
+			});
+		} else if (text[meta.start] === "{") {
+			inserts.push({
+				at: meta.end - 1,
+				text: `${empty(text, meta) ? "" : ","}${entry}`,
+			});
+		} else {
+			return text;
+		}
+		return insert(text, inserts);
+	} catch {
+		return text;
 	}
-	out["_meta"] = {
-		...(isObject(out["_meta"]) ? out["_meta"] : {}),
-		[ANSWERED_BY_META]: { member: who.member, label: who.label },
-	};
-	return { ...message, result: out };
 }
 
 /** Whether a tool result in a response is an error (`isError`, or a JSON-RPC error). */

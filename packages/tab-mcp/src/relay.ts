@@ -1711,7 +1711,10 @@ function startRelay(
 				body:
 					route.tab === undefined
 						? g.body.text
-						: withTab(g.body.value, route.tab),
+						: // Only the tab's value changes; a body whose `tab` cannot
+							// be found in its text goes as it came (the member then
+							// refuses the group's id).
+							(withTab(g.body.text, route.tab) ?? g.body.text),
 				rpcId: g.rpcId,
 				isListen: g.isListen,
 				grant: {
@@ -1761,7 +1764,7 @@ function startRelay(
 			const result = await Promise.race([exchange.response, retrying]);
 			if (result !== RETRY) {
 				const text = answeredText(route.member, route.label, route.fallback);
-				return editResponse(result, g.rpcId, (message) => {
+				return editResponse(result, g.rpcId, (body, message) => {
 					// `use_tab` pins for the group once the member pinned it
 					// (it pins only a tab it may read).
 					if (
@@ -1771,7 +1774,7 @@ function startRelay(
 					) {
 						void sign.pin(g.group, route.member, route.tab);
 					}
-					return nameMember(message, call !== undefined, {
+					return nameMember(body, call !== undefined, {
 						member: route.member,
 						label: route.label,
 						text,

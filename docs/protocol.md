@@ -287,9 +287,14 @@ member id, a colon and the browser's tab id, for example `m_Q2x4…:1234`. The r
 the member off before a call reaches the member, so a member only ever sees its own ids.
 
 **Where a group grant's request goes.** The relay reads only the JSON-RPC method of a
-POST to `/s/<app>/mcp` and, for `tools/call`, the tool name and the argument `tab`:
+POST to `/s/<app>/mcp` and, for `tools/call`, the tool name and, for the tab-mcp browser
+extension's own tools that take one (`page_info`, `webmcp_tools`, `webmcp_call`,
+`navigate`, `go_back`, `go_forward`, `reload`, `use_tab`), the argument `tab`. Every
+other tool's arguments, a `page_<name>` tool's (the web page's own input schema, where
+a `tab` means what the page says) among them, are neither read nor changed: such a call
+goes by rules 2 and 3.
 
-1. `tools/call` with a `tab` argument: the member it names. The relay sets the argument
+1. A call of one of those tools with a `tab` argument: the member it names. The relay sets the argument
    to the browser's own tab id (and an `mcp-param-tab` header, if the AI app sent one)
    and tunnels the call. A `tab` that is not `<member>:<tab>`, or names no member of the
    group, is answered by the relay: a tool result with `isError` that ends with "Call
@@ -354,7 +359,11 @@ by why it was not the browser whose window had the focus last; every result (`to
 and `server/discover` too) gets `_meta["ch.ractive.tab-mcp/answeredBy"] = {member,
 label}` (`list_tabs`: `{members: [{member, label}, …]}`). The rest of the result,
 `structuredContent` included, is the member's: an output schema still holds. JSON-RPC
-errors pass unchanged. In an event stream only the event with the request's response is
+errors pass unchanged. The relay edits the text, not a parsed copy: it
+replaces the `tab` value where it stands and inserts the text item and the `_meta` key
+before the closing brackets, so every other byte is the AI app's or the member's (a
+number JavaScript cannot hold, such as an integer above 2^53, stays as it was written).
+A body of a shape it does not expect passes unchanged. In an event stream only the event with the request's response is
 rewritten; the other events, comments and keep-alives pass as they came.
 
 **The mode, the pin and the focus.** One setting per group, the same in every panel:

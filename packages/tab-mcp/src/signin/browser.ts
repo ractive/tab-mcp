@@ -179,6 +179,8 @@ interface GroupState {
 	shownFocus?: string | undefined;
 	/** The group's grant ids as last announced, to tell members of a change. */
 	grantIds?: string[];
+	/** The group's grants as last listed, for an announcement when the store cannot list them. */
+	grants?: GrantInfo[];
 }
 
 /** Where a call without a pin goes now (`target`). */
@@ -463,7 +465,12 @@ export class BrowserSignIn {
 			});
 			return;
 		}
+		// The group's grants as the store lists them; if it cannot, those of
+		// the last announcement: a store failure there must not keep the
+		// members from hearing of the rest (only `listBindings` failing does).
+		const state = this.#state(group);
 		let grants: GrantInfo[];
+		let listed = true;
 		try {
 			grants = (
 				await this.#host.store.listGrants(groupAddress(group), Date.now())
@@ -481,7 +488,8 @@ export class BrowserSignIn {
 				op: "listGrants",
 				...errorFields(error),
 			});
-			return;
+			grants = state.grants ?? [];
+			listed = false;
 		}
 		const sessions = this.onlineMembers(group);
 		const online = new Set(sessions.map((s) => s.member?.memberId));
@@ -491,9 +499,11 @@ export class BrowserSignIn {
 			online: online.has(b.memberId),
 			signedInAt: new Date(b.createdAt).toISOString(),
 		}));
-		const state = this.#state(group);
 		state.labels = new Map(bindings.map((b) => [b.memberId, b.label]));
-		state.grantIds = grants.map((g) => g.grantId);
+		if (listed) {
+			state.grants = grants;
+			state.grantIds = grants.map((g) => g.grantId);
+		}
 		const focus =
 			state.mode === "front" ? this.target(group)?.member : undefined;
 		state.shownFocus = focus;

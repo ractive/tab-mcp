@@ -53,9 +53,11 @@ The relay. Each relay release is also a Docker image, `ractive/tab-mcp` and
 ### Changed
 
 - The SQLite store is at schema 8: a `bindings` table, a `groups` table and the tokens'
-  `group_key`. The tokens stay as they are. Relays before this one refuse a file at
-  schema 8 (they would drop a group grant's group when they refresh it): roll back with
-  the backup made before the upgrade.
+  `group_key`. The tokens stay as they are, and relays from schema 6 on (since the fixed
+  address, DEC-196) can still open the file. After such a rollback, group grants stop:
+  the older relay answers their requests as for a page that is not open, and a group
+  grant it refreshes loses its group for good. Their AI apps then sign in again on the
+  pairing page; page grants are not affected.
 
 ## [0.13.3][relay-0.13.3] - 2026-11-23
 

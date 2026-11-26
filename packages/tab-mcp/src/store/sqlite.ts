@@ -22,10 +22,13 @@ const SCHEMA_VERSION = 8;
  * Version 6 added `app` (DEC-196): an older relay would drop it, and it
  * serves addresses that no longer exist. Version 7 added the `bindings`
  * table (DEC-231), which an older relay leaves alone. Version 8 added the
- * tokens' `group_key` (DEC-232): an older relay would drop it when it
- * refreshes a group grant, which then reaches no browser, so it is 8.
+ * tokens' `group_key` and the `groups` table (DEC-232); it stays 6 (coordinator for the owner,
+ * 2026-11-26): an older relay fails closed on a group grant (its address id
+ * `group:<key>` is no page's, so "not open"), and one it refreshes loses
+ * its group and then reaches no browser, so after a rollback group grants
+ * stop until their AI apps sign in again, and nothing else is lost.
  */
-const MIN_READER_VERSION = 8;
+const MIN_READER_VERSION = 6;
 /** The reuse window of used refresh tokens (DEC-091), for the version 4 step. */
 const REUSE_WINDOW_MS = 86_400_000;
 

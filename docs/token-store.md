@@ -427,7 +427,10 @@ is a complete example. Its schema is at version 8: 6 added the `app` column, 7 t
 `bindings` table (DEC-231), 8 the tokens' `group_key` and the `groups` table (DEC-232).
 A file from before 6 is migrated when it is opened, and that step deletes every token in
 it: they were made for addresses that no longer exist, so every AI app pairs again. The
-steps to 7 and 8 keep every token. A file at 8 is marked as needing a relay that knows
-schema 8: an older relay would drop a group grant's group when it refreshes it, so it
-refuses to open the file (see [Upgrading](self-hosting.md#upgrading)). Run the conformance suite
+steps to 7 and 8 keep every token, and a file at 8 stays readable for relays from
+schema 6 on: such a relay answers a group grant's requests as for a page that is not
+open (no page has the address id `group:<group>`), and one it refreshes loses its
+`group` and then reaches no browser, also after the upgrade again. After a rollback
+group grants therefore stop until their AI apps sign in again; nothing else is lost
+(see [Upgrading](self-hosting.md#upgrading)). Run the conformance suite
 against your store before you use it.

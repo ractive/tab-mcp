@@ -29,7 +29,6 @@ import {
 import { accountKey } from "../src/signin/providers.ts";
 import { ANSWERED_BY_META } from "../src/signin/route.ts";
 import { MemoryTokenStore } from "../src/store/memory.ts";
-import type { TokenStore } from "../src/store/types.ts";
 import { issueAccessToken } from "../src/test-token.ts";
 import {
 	LogCapture,
@@ -81,9 +80,23 @@ afterEach(async () => {
 	fakes.google = { sub: "g-alice", email: "alice@gmail.example" };
 });
 
+/** A memory store whose group grants can fail to list, as a store that is down. */
+class FlakyStore extends MemoryTokenStore {
+	failGroupGrants = false;
+	override async listGrants(
+		addressId: string,
+		now: number,
+	): ReturnType<MemoryTokenStore["listGrants"]> {
+		if (this.failGroupGrants && addressId.startsWith("group:")) {
+			throw new Error("the store is down");
+		}
+		return super.listGrants(addressId, now);
+	}
+}
+
 interface Ctx {
 	relay: Relay;
-	store: TokenStore;
+	store: FlakyStore;
 	logs: LogCapture;
 	wsUrl: string;
 	address: string;
@@ -93,7 +106,7 @@ function start(
 	options: CreateRelayOptions = {},
 	hooks: RelayTestHooks = {},
 ): Ctx {
-	const store = new MemoryTokenStore();
+	const store = new FlakyStore();
 	const logs = new LogCapture();
 	const relay = createTestRelay(
 		{
@@ -227,7 +240,11 @@ class Member {
 		} else {
 			result = { resultType: "complete" };
 		}
-		const answer = JSON.stringify({ jsonrpc: "2.0", id: body.id, result });
+		// `big: true`: numbers JavaScript cannot hold, written as text.
+		const answer =
+			body.params?.arguments?.["big"] === true
+				? `{"jsonrpc":"2.0","id":${JSON.stringify(body.id)},"result":{"content":[{"type":"text","text":"big"}],"structuredContent":{"n":12345678901234567890,"f":1e400}}}`
+				: JSON.stringify({ jsonrpc: "2.0", id: body.id, result });
 		if (!sse) {
 			tab.send({
 				type: "http.response",
@@ -811,6 +828,83 @@ describe("the group's grants", () => {
 			code: "unknown_id",
 			for: "group.grant.revoke",
 		});
+	});
+});
+
+describe("review of PR 258", () => {
+	test("a page_<name> tool's own tab argument is the page's: read by nobody, changed by nobody; the call follows the focus", async () => {
+		const ctx = start();
+		const a = await member(ctx, "work Chrome", [], { sse: false });
+		const b = await member(ctx, "Firefox");
+		const token = await groupToken(ctx, await groupOf(ctx, a));
+		a.tab.send({ type: "focus" });
+		await b.group((g) => g.focus === a.memberId);
+		for (const tab of ["Sheet2", `${b.memberId}:1`, "m_nobody:1"]) {
+			const body = JSON.stringify(
+				rpc(7, "tools/call", { name: "page_select_sheet", arguments: { tab } }),
+			);
+			const res = await mcpPost(ctx.address, body, {
+				token,
+				headers: {
+					"mcp-method": "tools/call",
+					"mcp-name": "page_select_sheet",
+				},
+			});
+			const result = (await answer(res))["result"] as ToolResult;
+			expect(result.isError).toBeUndefined();
+			expect(a.requests.at(-1)?.body).toBe(body);
+		}
+		expect(a.calls.map((c) => c.args)).toEqual([
+			{ tab: "Sheet2" },
+			{ tab: `${b.memberId}:1` },
+			{ tab: "m_nobody:1" },
+		]);
+		expect(b.calls).toEqual([]);
+	});
+
+	for (const sse of [false, true]) {
+		test(`numbers JavaScript cannot hold pass unchanged both ways (${sse ? "event stream" : "JSON"})`, async () => {
+			const ctx = start();
+			const a = await member(ctx, "work Chrome", [], { sse });
+			const token = await groupToken(ctx, await groupOf(ctx, a));
+			const body = `{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"webmcp_call","arguments":{"n":12345678901234567890,"tab" : "${a.memberId}:9","f":1e400,"big":true},"_meta":{"io.modelcontextprotocol/protocolVersion":"2026-07-28"}}}`;
+			const res = await mcpPost(ctx.address, body, {
+				token,
+				headers: { "mcp-method": "tools/call", "mcp-name": "webmcp_call" },
+			});
+			expect(a.requests[0]?.body).toBe(
+				body.replace(`"${a.memberId}:9"`, '"9"'),
+			);
+			const text = await res.text();
+			expect(text).toContain(
+				'"structuredContent":{"n":12345678901234567890,"f":1e400}',
+			);
+			expect(text).toContain(
+				`"content":[{"type":"text","text":"big"},{"type":"text","text":"Answered by the browser “work Chrome” (its tabs are ${a.memberId}:<id> in list_tabs)."}]`,
+			);
+			expect(text).toContain(
+				`"_meta":{"ch.ractive.tab-mcp/answeredBy":{"member":"${a.memberId}","label":"work Chrome"}}`,
+			);
+		});
+	}
+
+	test("a group message is still sent when the group's grants cannot be listed: with the last ones, or none", async () => {
+		const ctx = start();
+		ctx.store.failGroupGrants = true;
+		const a = await member(ctx, "work Chrome");
+		expect((await a.group()).grants).toEqual([]);
+		ctx.store.failGroupGrants = false;
+		await groupToken(ctx, await groupOf(ctx, a), "g_kept");
+		a.tab.send({ type: "group.mode", mode: "front" });
+		await a.group((g) => g.grants.length === 1);
+		ctx.store.failGroupGrants = true;
+		a.tab.send({ type: "member.rename", member: a.memberId, label: "Work" });
+		const g = await a.group((x) => x.members[0]?.label === "Work");
+		expect(g.grants.map((x) => x.grantId)).toEqual(["g_kept"]);
+		expect(
+			ctx.logs.events("store.error").filter((e) => e["op"] === "listGrants")
+				.length,
+		).toBeGreaterThanOrEqual(2);
 	});
 });
 

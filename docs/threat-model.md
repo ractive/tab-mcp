@@ -1223,8 +1223,10 @@ one, or the one whose window had the focus last, and `list_tabs` to every member
   in with a taken-over account, or a Firefox extension that is not the tab-mcp browser
   extension (A16), is such a member.
 - **What the relay reads.** For a group grant the relay reads the JSON-RPC method, the
-  tool name and the `tab` argument of a call, and the result of the response; it rewrites
-  the `tab` argument and adds a line naming the member, nothing else. A page grant's
+  tool name, the `tab` argument of the extension's own tools that take one (never a
+  `page_<name>` tool's arguments, which are the web page's), and the result of the
+  response; it rewrites that `tab` value in the text and inserts a line naming the
+  member, every other byte as it came. A page grant's
   requests and responses pass unchanged, byte for byte, as before.
 - **What the relay learns.** In mode "the tab in front" the relay learns when one of a
   member's windows gains the focus (no address, no title, no tab) and stamps it with its

@@ -74,7 +74,7 @@ test("review of PR 65: the file records the oldest relay schema that may open it
 	const db = new Database(path, { strict: true });
 	expect(
 		db.query("SELECT value FROM meta WHERE key = 'min_reader_version'").get(),
-	).toEqual({ value: 8 });
+	).toEqual({ value: 6 });
 	expect(db.query("PRAGMA user_version").get()).toEqual({ user_version: 8 });
 	// A later release marks the file as needing schema 9.
 	db.run("UPDATE meta SET value = 9 WHERE key = 'min_reader_version'");
@@ -160,7 +160,7 @@ test("a schema 5 file opens and gains the app column; its tokens go, as they wer
 	// A relay of schema 5 would drop the column on write: it must refuse the file.
 	expect(
 		db.query("SELECT value FROM meta WHERE key = 'min_reader_version'").get(),
-	).toEqual({ value: 8 });
+	).toEqual({ value: 6 });
 	db.close();
 
 	// Opening again changes nothing: the step runs once, and deletes nothing more.
@@ -291,14 +291,14 @@ test("DEC-231: a schema 6 file opens with a bindings table; its tokens stay as t
 	expect(db.query("PRAGMA user_version").get()).toEqual({ user_version: 8 });
 	expect(
 		db.query("SELECT value FROM meta WHERE key = 'min_reader_version'").get(),
-	).toEqual({ value: 8 });
+	).toEqual({ value: 6 });
 	db.close();
 	const again = new SqliteTokenStore(path);
 	expect(await again.getBinding("a6", 10)).toEqual(binding);
 	await again.close();
 });
 
-test("DEC-232: a schema 7 file gains the tokens' group and the groups' modes; its tokens stay page grants, and older relays refuse it", async () => {
+test("DEC-232: a schema 7 file gains the tokens' group and the groups' modes; its tokens stay page grants, and older relays may still open it", async () => {
 	const path = join(dir, "v7.db");
 	const page = {
 		hash: "h7",
@@ -343,9 +343,22 @@ test("DEC-232: a schema 7 file gains the tokens' group and the groups' modes; it
 	await store.close();
 	const db = new Database(path, { strict: true });
 	expect(db.query("PRAGMA user_version").get()).toEqual({ user_version: 8 });
-	// A relay of schema 7 would drop the group when it refreshes such a grant.
+	// Readable by relays from schema 6 on (coordinator for the owner,
+	// 2026-11-26): an older relay fails closed on a group grant.
 	expect(
 		db.query("SELECT value FROM meta WHERE key = 'min_reader_version'").get(),
-	).toEqual({ value: 8 });
+	).toEqual({ value: 6 });
+	// A group grant refreshed by a relay of schema 7 is written without the
+	// group: it keeps the group's address id, which no page has.
+	db.run(
+		`INSERT INTO tokens (hash, kind, grant_id, address_id, client_id, client_name, scopes,
+		grant_created_at, issued_at, expires_at, app)
+		VALUES ('hold', 'access', 'gg', 'group:grp', 'c', 'C', '["tools"]', 1, 1, 9999999999999, 'my-app')`,
+	);
 	db.close();
+	const again = new SqliteTokenStore(path);
+	const old = await again.get("hold");
+	expect(old?.addressId).toBe("group:grp");
+	expect(old !== undefined && "group" in old).toBe(false);
+	await again.close();
 });

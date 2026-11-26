@@ -6107,9 +6107,25 @@ say, decided here; the conservative choice where the owner had not decided, mark
   id `group:<key>`, which no page can have (base32 has no colon). So `listGrants`,
   `revoke`, tombstones, reuse detection and `/revoke` need nothing new, and a store that
   drops `group` fails closed (no page at that address). SQLite schema 8: `tokens.group_key`
-  and a `groups` table; `min_reader_version` 8, since an older relay would drop the group
-  on a refresh. A rollback past this release therefore needs the backup (open: the owner
-  may prefer readable files over that safety).
+  and a `groups` table. `min_reader_version` stays 6 (coordinator for the owner,
+  2026-11-26, review of PR 258; the first version raised it to 8): an older relay reading
+  a group token sees the address id `group:<key>`, which no page has, and answers "not
+  open"; a group grant it refreshes loses its group and then reaches no browser, also
+  after the upgrade again. So a rollback works without the backup; group grants just stop
+  until their AI apps sign in again.
+- **Only the extension's own tools' `tab`** (review of PR 258). The relay reads and
+  rewrites the `tab` argument only of `page_info`, `webmcp_tools`, `webmcp_call`,
+  `navigate`, `go_back`, `go_forward`, `reload` and `use_tab`; any other tool's arguments,
+  a `page_<name>` tool's (the web page's own schema) above all, pass unread and the call
+  goes by the pin and focus rules.
+- **Text, not a parsed copy** (review of PR 258). The `tab` value is spliced into the
+  request text where it stands; the answered-by item and the `_meta` key are inserted
+  into the response text before the closing brackets. No body passes through
+  JSON.parse and JSON.stringify, which would round integers above 2^53 and turn 1e400
+  into null. A body of an unexpected shape passes unchanged.
+- **A grant listing that fails** (review of PR 258) does not hold back the `group`
+  message: it goes with the grants of the last announcement, or none; only a failed
+  `listBindings` suppresses it.
 - **Where a call goes.** `tab` `<member>:<tab>` first (the member taken off, also in an
   `mcp-param-tab` header); else the pin's member; else the member whose window had the
   focus last, else the one that came online last, and the result says so. Mode pinned
