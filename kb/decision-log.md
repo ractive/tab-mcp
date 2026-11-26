@@ -6015,7 +6015,8 @@ DEC-229; the rest here follows from it).
   the extension did not have before (ext/review-fixes): only for `session`, at its
   default access level (no content script), and nothing is read from `local` or
   `sync`. A unit test holds it to `worker/targets.ts`. (Review of PR 255; the
-  permission is new to the store listings: owner to confirm.)
+  owner accepted the permission, 2026-11-26: Chrome and Firefox show no install warning
+  for it, so updates stay silent.)
 - **The first pin is a readable tab:** in mode "a pinned tab" without a pin, a call pins
   the tab in front only if the extension may read it (the rule of `use_tab`); else the
   call is answered as in mode "the tab in front" (it says why it cannot read the tab)
