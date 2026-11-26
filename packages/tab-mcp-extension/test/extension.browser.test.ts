@@ -202,7 +202,7 @@ async function closePanel(stack: Stack): Promise<void> {
 
 /** Set the relay in the panel's settings; resolves once the connection uses it. */
 async function setRelay(panel: Page, relay: string): Promise<void> {
-	// The relay address is under "Settings", closed at first.
+	// The relay address is under "Settings", open at first.
 	await panel.eval(`document.querySelector("details.settings").open = true`);
 	await panel.eval(
 		`document.getElementById("relay").value = ${JSON.stringify(relay)}`,
