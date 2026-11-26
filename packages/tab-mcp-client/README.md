@@ -1699,6 +1699,29 @@ counts as new.
   was for something else): `enabled()` is false until the user turns it on, and the
   content script is not registered while it is off.
 
+**Messages of the protocol the library does not speak** (`relayMessages`, DEC-233): an
+extension that takes part in more of the tab–relay protocol than pages do (the tab-mcp
+browser extension's sign-in at the relay and its group of browsers) names what it
+understands in `hello` and gets the messages the library does not know:
+
+```ts
+const mcp = new TabMcp({
+  relay, server, app: "my-extension",
+  relayMessages: {
+    capabilities: ["signin.v1"],
+    // Each session's `session` message as it came, then every unknown type, in order;
+    // `send` answers on that session (false once it is over).
+    receive(message, send) {
+      if (message.type === "signin.url") { /* … */ send({ type: "signin.complete", code }); }
+    },
+  },
+});
+```
+
+The objects are the relay's: check every field. `send` refuses the library's own types
+(`hello`, `grant.revoke`, …) with a `TypeError`; capabilities the relay would refuse make
+`connect()` reject. A relay that does not know a capability answers as before.
+
 ## Security
 
 Connecting an AI app to a page means trusting that page, as with any MCP server. Keep

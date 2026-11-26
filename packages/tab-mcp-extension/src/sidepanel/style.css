@@ -1135,6 +1135,50 @@ button.copy {
 	overflow-wrap: anywhere;
 }
 
+/* --- your browsers (DEC-233) -------------------------------------------------- */
+
+.signed-in {
+	font-weight: 600;
+	overflow-wrap: anywhere;
+}
+
+/* A browser joined, or this one's sign-in ended: the warning's tint, until OK. */
+.notice {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	gap: var(--s2);
+	padding: var(--s2) var(--s3);
+	border: 1px solid var(--warn-edge);
+	border-radius: var(--r-card);
+	background: var(--warn-bg);
+	color: var(--ink);
+}
+
+.notice p {
+	margin: 0;
+	overflow-wrap: anywhere;
+}
+
+/* A member's Rename and Remove, side by side at the row's end. */
+.member-buttons {
+	display: inline-flex;
+	flex: none;
+	gap: var(--s1);
+}
+
+/* Renaming a member: the field takes the row. */
+.member-rename {
+	display: flex;
+	flex: 1;
+	gap: var(--s1);
+}
+
+.member-rename input {
+	flex: 1;
+	min-width: 0;
+}
+
 /* --- settings ----------------------------------------------------------------- */
 
 .settings summary {

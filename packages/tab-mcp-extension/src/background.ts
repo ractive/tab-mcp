@@ -202,6 +202,11 @@ chrome.tabs.onUpdated.addListener((id, change, tab) => {
 		withConnection((c) => c.pageChanged(id, tab.active));
 });
 chrome.windows.onFocusChanged.addListener(frontChanged);
+// Signed in, in mode "the tab in front": the relay hears which browser is
+// in use, nothing more (DEC-233).
+chrome.windows.onFocusChanged.addListener((windowId) =>
+	withConnection((c) => c.windowFocused(windowId)),
+);
 
 // Content scripts may say only this: the page's tools changed (`toolchange`)
 // (it counts in an active tab or the pinned one), or the page announced the

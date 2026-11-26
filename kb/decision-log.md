@@ -6049,3 +6049,95 @@ DEC-229; the rest here follows from it).
   a tab that is not in front in either mode (a `tab` argument), so "while this tab is in
   front" would no longer be true. The client library is unchanged (it reads the flag).
 - **Not here:** sign-in and groups (the relay's part of iteration 53).
+
+## DEC-233: the extension signed in at the relay, and its group
+
+2026-11-26, iteration 53, fourth pull request (the extension; the relay's side is DEC-231
+and DEC-232, the extension's mode and pin DEC-230). What the plan and the relay's
+protocol left to the extension, decided here; the conservative choice where the owner
+had not decided, marked (open) where the owner may want otherwise.
+
+- **The client library carries it** (`relayMessages`): `capabilities` go into `hello`,
+  and `receive(message, send)` gets each session's `session` message as it came, then
+  every message of a type the library does not know, with a `send` for that session
+  (`false` once it is over, a `TypeError` for one of the library's own types). The
+  checks and the sending live in the lazy connection chunk; the core keeps the option
+  and passes it on, 21 bytes gzipped, which took it past its 6.5 KB budget: now 6.75 KB
+  (open: the owner may prefer to keep 6.5 and golf elsewhere). Pages have no use for it.
+- **When the group's record is where calls go**: while the session says this browser is
+  signed in (`session.signIn.member`, or after `signin.done`); while not connected, when
+  a sign-in is kept. The browser's own setting (DEC-230) is left as it was and is back
+  after a sign-out. A change of the setting while not connected is refused with "Turn on
+  AI access to change where AI apps work …": it is the setting of every browser of the
+  group, and only the relay can change it. A call waits up to 2 s for the session's first
+  `group` before it reads the setting.
+- **Saved at once, confirmed by the relay**: `group.mode` and `group.pin` are sent and
+  the local record changed with them, so the next call goes where this one pinned; the
+  relay's `group` that follows confirms it, or puts what it holds in its place.
+- **A pin in another browser fails closed**: a call without `tab` that still reaches this
+  browser runs nothing ("The pinned tab is in another of the user's browsers; nothing was
+  done in a tab of this one." and the `list_tabs` hint), a `page_<name>` call does not
+  run, and nothing is pinned here by it. Calls with `tab` run as before. "Work here"
+  moves the pin here.
+- **Focus**: on `windows.onFocusChanged` with a window (not `WINDOW_ID_NONE`), once per
+  session after the first `group` in mode "the tab in front" if a window of this browser
+  has the focus, and when this browser's panel turns the mode to "the tab in front" (the
+  browser in use then is this one; the brief named only the first two). Never in mode "a
+  pinned tab".
+- **A browser that joined**: announced with a notice in the panel (OK dismisses it) and a
+  notification, against the member ids the extension saw last, which it keeps in
+  IndexedDB so that one that joined while this browser was off is announced at the next
+  connect. The members there at this browser's own sign-in are not news; one that left
+  and signs in again is announced again. A click on the notification does nothing but
+  close it (opening the panel would need the window at once, which the event does not
+  give).
+- **Microsoft's administrator's approval**: the relay sends
+  `signin_error=admin_approval` for it (PR 258, commit 54bbb8c; before, only
+  `provider_error`). The extension says "Your organisation's administrator has to approve
+  tab-mcp relay first." for `signin_error=admin_approval` or an `AADSTS65001`,
+  `AADSTS90094` or `AADSTS90095` anywhere in the address the window ended at; for a
+  Microsoft `provider_error` without either it adds that this may be the reason.
+- **What it says** is its own text for every reason of `signin.failed` and of the
+  redirect, never the relay's or the provider's code. "Signed in as <name> with
+  <provider>", for Microsoft with "(personal account)" or "(work or school account)"
+  (open: the brief had "Signed in as <name>" alone; the provider tells a GitHub login
+  from an address). The card is "Your browsers", below the tab in front, so that its
+  changes move neither "Work here" nor the tools' switches.
+- **The label**: "<browser> on <system>" (Chrome, Edge by its user agent's `Edg/`, the
+  rest of Chromium as Chrome, Firefox; `runtime.getPlatformInfo().os`), sent with
+  `signin.start`. Rename in the row (a field, Save, Cancel), any member. Remove only
+  for the others (this browser's own is Sign out), asked first ("Remove? Click again",
+  no double click), as the group's Disconnect is.
+- **A new session drops the setting loaded before it** whenever it names this
+  browser's member, and so does a lost connection while a sign-in is kept: the next call
+  waits for the session's `group` (up to 2 s) instead of going by what an earlier worker
+  or session knew (after a restart, "the tab in front"); a `group` that moves the target
+  drops it before anything is written (review of PR 259). One `signin.url` is taken per
+  start; a malformed one or another provider's ends the sign-in with a reason. No `focus`
+  is sent while the group's focus is this browser already.
+- **The sign-in buttons wait** 750 ms after they came or moved, in the disabled look,
+  and ignore a click in the quiet after the questions' dialog (ES 5, DEC-228): a sign-in
+  lets the group's AI apps reach this browser. The flow opens only an address of the
+  relay's own origin; another `signin.url` is refused and said so.
+- **What is kept**: the provider, the name and the kind in IndexedDB, forgotten at
+  sign-out, at `signin.ended`, at a session of a relay that offers no sign-in, and when
+  the relay changes. A session that offers sign-in but names no member for this browser
+  (the relay could not read its binding, say) leaves them kept, unused and not shown,
+  until `signin.ended` or the next session says otherwise (review of PR 259). "Disconnect all apps" signs out first: its new secret is a new
+  browser to the relay, and the old one would stay a member that never comes back.
+- **The group's AI apps count as connected**: for the state line and the icon ("on"),
+  the names pages with the tab-mcp library are told (they reach those pages too) and the
+  names in "Recent calls".
+- **Permissions and stores**: `identity` (for `launchWebAuthFlow` alone; Chrome lists no
+  warning for it). The Chrome Web Store's data usage declares personally identifiable
+  and authentication information for the sign-in (the name the extension keeps, the
+  one-time code), conservatively (open: the owner decides the boxes; the developer keeps
+  neither). The ractive.ch privacy page and the store texts follow PRIVACY.md.
+- **No end-to-end test in the repository yet**: the browser tests run the workspace's
+  relay, which has no sign-in until PR 257 and 258 are merged. A manual run of the
+  extension's worker against the relay of `relay/group-grants` with its fake providers
+  (real WebSockets and HTTP, the flow followed with a cookie jar) passed: the three
+  providers offered, two browsers signed in with one GitHub account in one group, the
+  second announced in the first, the mode set in one shown in the other, a rename, a
+  removal, a sign-out. The unit tests cover the rest; a browser test follows once the
+  relay is on main.

@@ -10,6 +10,9 @@
 import { FIREFOX, PRODUCT } from "./browser.ts";
 import type { ContentEvent } from "./messages.ts";
 import type { NoAccessReason } from "./tabs.ts";
+import type { SignInView } from "./worker/signin.ts";
+
+export type { SignInView } from "./worker/signin.ts";
 
 /**
  * The extension's MCP server name: the worker's connection gives it to the
@@ -86,7 +89,18 @@ export type PanelCommand =
 	/** "AI apps work in": the tab in front, or a pinned tab (DEC-230). */
 	| { type: "set-target-mode"; mode: "front" | "pinned" }
 	/** "Work here": pin tab `tabId`, the tab the panel shows (DEC-230). */
-	| { type: "work-here"; tabId: number };
+	| { type: "work-here"; tabId: number }
+	/** "Sign in with <provider>" (DEC-233). */
+	| { type: "sign-in"; provider: string }
+	| { type: "sign-out" }
+	/** A member of the group renamed, this browser or another. */
+	| { type: "rename-member"; member: string; label: string }
+	/** Another member removed from the group (asked in the panel first). */
+	| { type: "remove-member"; member: string }
+	/** An AI app connected to the whole group: Disconnect. */
+	| { type: "revoke-group-grant"; grantId: string }
+	/** OK under the sign-in's notice. */
+	| { type: "dismiss-sign-in-notice" };
 
 /** Where AI apps' calls go, as the panel shows it (DEC-230). */
 export interface TargetView {
@@ -97,6 +111,17 @@ export interface TargetView {
 	 * fail until another is pinned.
 	 */
 	pinned?: { tabId: number; title: string; closed?: true };
+	/**
+	 * Signed in (DEC-233), mode "pinned": the pin is in another browser of
+	 * the group (`browser`), not one of this browser's tabs.
+	 */
+	elsewhere?: true;
+	/**
+	 * Signed in: the browser of the group whose tab calls without `tab` go
+	 * to, as the relay last said (the focus in mode "front", the pin's
+	 * member in mode "pinned"); `self` is this browser.
+	 */
+	browser?: { label: string; self: boolean };
 }
 
 /** A connected AI app. */
@@ -232,6 +257,11 @@ export interface PanelState {
 	tab?: TabView;
 	/** Where AI apps' calls go (DEC-230). */
 	target?: TargetView;
+	/**
+	 * Signing in at the relay and the group of browsers (DEC-233): only
+	 * where the relay offers it, or while signed in.
+	 */
+	signIn?: SignInView;
 	/**
 	 * Without their arguments, which can be large: each question's come once
 	 * per panel, in a `question-args` message before the first state that
@@ -469,6 +499,27 @@ export function parseCommand(message: unknown): PanelCommand | undefined {
 		case "work-here":
 			return Number.isSafeInteger(m["tabId"])
 				? { type: "work-here", tabId: m["tabId"] as number }
+				: undefined;
+		case "sign-in":
+			return isString(m["provider"])
+				? { type: "sign-in", provider: m["provider"] }
+				: undefined;
+		case "sign-out":
+		case "dismiss-sign-in-notice":
+			return { type: m["type"] };
+		case "rename-member":
+			return isString(m["member"]) &&
+				isString(m["label"]) &&
+				m["label"].length <= 256
+				? { type: "rename-member", member: m["member"], label: m["label"] }
+				: undefined;
+		case "remove-member":
+			return isString(m["member"])
+				? { type: "remove-member", member: m["member"] }
+				: undefined;
+		case "revoke-group-grant":
+			return isString(m["grantId"])
+				? { type: "revoke-group-grant", grantId: m["grantId"] }
 				: undefined;
 		default:
 			return undefined;

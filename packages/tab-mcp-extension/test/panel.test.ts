@@ -469,7 +469,14 @@ describe("the tab card's texts", () => {
 			expect(doc.getElementById("always-allow-note")?.hidden).toBe(true);
 			expect(
 				[...doc.querySelectorAll("h2, h3")].map((h) => h.textContent),
-			).toEqual(["AI access", "Connect your AI app", "Tab in front", "Tools"]);
+			).toEqual([
+				"AI access",
+				"Connect your AI app",
+				"Tab in front",
+				"Tools",
+				"Your browsers",
+				"AI apps connected to all your browsers",
+			]);
 			// The AI access switch is named by the card's heading: no second
 			// "AI access" beside it.
 			expect(

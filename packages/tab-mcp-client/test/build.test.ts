@@ -101,11 +101,13 @@ test("importing the library loads only the core; connect() loads the rest", asyn
 	console.log(
 		`core ${coreGz} B gzipped, connection ${(connection / 1024).toFixed(1)} KB gzipped`,
 	);
+	// 6.75 KB since `relayMessages` for the browser extension's sign-in
+	// (DEC-233: 21 bytes, its checks and its sending in the lazy chunk);
 	// 6.5 KB since registerTool checks as the WebMCP draft does (DEC-227);
 	// 6.25 KB since `serve` and the optional relay (DEC-122); 6 KB since
 	// client 0.8.0 (DEC-103); 5.5 KB since the fixes of iteration 13
 	// (DEC-086); 5.25 KB since the per-page secret key (DEC-083); 5 KB before.
-	expect(coreGz).toBeLessThanOrEqual(6.5 * 1024);
+	expect(coreGz).toBeLessThanOrEqual(6.75 * 1024);
 	// `serve` itself is in the lazy chunk, with the tunnel.
 	expect(coreCode).not.toContain("bad_message");
 	expect(connection).toBeLessThanOrEqual(100 * 1024);

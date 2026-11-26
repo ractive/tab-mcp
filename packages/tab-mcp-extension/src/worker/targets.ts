@@ -8,10 +8,11 @@
  * call's `tab` argument (an id from list_tabs) always wins and leaves the
  * pin as it is.
  *
- * The mode and the pin live behind `TargetStore`: for now the mode in the
- * worker's IndexedDB and the pin in the browser session's storage
- * (`kvTargetStore`); later the relay's record of a signed-in group. Tab ids are the
- * browser's, as decimal strings; a group's will carry a member before them
+ * The mode and the pin live behind `TargetStore`: the mode in the worker's
+ * IndexedDB and the pin in the browser session's storage (`kvTargetStore`),
+ * or, while the browser is signed in at the relay, the group's record there
+ * (`signin.ts`, DEC-233), whose pin can be in another member. Tab ids are
+ * the browser's, as decimal strings; a group's carry a member before them
  * (`<member>:<tab>`), which the relay takes off before the call reaches the
  * extension.
  */
@@ -27,6 +28,11 @@ export interface TargetSetting {
 	mode: TargetMode;
 	/** The pinned tab's id (mode "pinned" only); none until a call or the user pins one. */
 	pin?: number;
+	/**
+	 * Mode "pinned", the pin in another browser of the signed-in group
+	 * (DEC-233): calls without `tab` are that browser's, none runs here.
+	 */
+	elsewhere?: true;
 }
 
 /** Where the setting is kept. */
@@ -120,6 +126,9 @@ export interface TargetChrome {
 export const LIST_TABS_HINT =
 	"Call list_tabs for the tabs you may use, then pass tab with the call, or use_tab to pin one.";
 
+/** What a call without `tab` says here while the pin is in another browser of the group. */
+export const PINNED_ELSEWHERE = `The pinned tab is in another of the user's browsers; nothing was done in a tab of this one. ${LIST_TABS_HINT}`;
+
 /** The id of tab `id` as list_tabs gives it, and as the `tab` argument takes it. */
 export const tabArgument = (id: number): string => String(id);
 
@@ -174,6 +183,7 @@ export class Targets {
 		return this.#serial(async () => {
 			const setting = await this.setting();
 			if (setting.mode === "front") return this.#chrome.front();
+			if (setting.elsewhere) throw new Error(PINNED_ELSEWHERE);
 			if (setting.pin !== undefined) return this.#pinned(setting.pin);
 			const front = await this.#chrome.front();
 			// Only a tab the extension may read, as use_tab pins: a new tab
@@ -193,6 +203,8 @@ export class Targets {
 	async peek(tab?: string): Promise<TargetTab> {
 		if (tab !== undefined) return this.#named(tab);
 		const setting = await this.setting();
+		if (setting.mode === "pinned" && setting.elsewhere)
+			throw new Error(PINNED_ELSEWHERE);
 		if (setting.mode === "pinned" && setting.pin !== undefined)
 			return this.#pinned(setting.pin);
 		return this.#chrome.front();
@@ -209,6 +221,7 @@ export class Targets {
 		return this.#serial(async () => {
 			const setting = await this.setting();
 			if (setting.mode === "front") return true;
+			if (setting.elsewhere) return false;
 			if (setting.pin !== undefined) return setting.pin === id;
 			await this.#save({ mode: "pinned", pin: id });
 			return true;
@@ -229,6 +242,18 @@ export class Targets {
 			const setting = await this.setting();
 			if (setting.mode === mode) return;
 			await this.#save({ mode });
+		});
+	}
+
+	/**
+	 * The store's setting changed without this class (the group's record at
+	 * the relay, or the store itself, at a sign-in or out): loaded again at
+	 * the next use, after what runs now.
+	 */
+	reload(): Promise<void> {
+		return this.#serial(async () => {
+			this.#setting = undefined;
+			this.#changed();
 		});
 	}
 

@@ -25,6 +25,7 @@ import type {
 	PairingCode,
 	ReconnectingInfo,
 	RelayClient,
+	RelayMessages,
 	ServeHandle,
 	ServeOptions,
 	ServerInfo,
@@ -248,6 +249,8 @@ export class TabMcp extends EventTarget {
 	/** The running `disconnectAll()`: a second call returns it, `connect()` waits for it. */
 	#renewing: Promise<void> | undefined;
 	readonly #identityAssertion: IdentityAssertionHandler | undefined;
+	/** A browser extension's own messages of the protocol (DEC-233). */
+	readonly #extra: RelayMessages | undefined;
 	#identity: IdentityState = "none";
 	#identityMessage: string | undefined;
 	/** Incremented per identity request, so a late answer of an older one is dropped. */
@@ -323,6 +326,7 @@ export class TabMcp extends EventTarget {
 		this.#alwaysAllow = options.alwaysAllow;
 		this.#ui = options.ui;
 		this.#identityAssertion = options.identityAssertion;
+		this.#extra = options.relayMessages;
 		this.#reconnect = options.reconnect !== false;
 		if (relay !== undefined) {
 			// One address per relay and page (server name, DEC-083).
@@ -1089,6 +1093,7 @@ export class TabMcp extends EventTarget {
 			appName: this.#appName,
 			tabs: this.#tabs,
 			library: { name: LIBRARY_NAME, version: VERSION },
+			extra: this.#extra,
 			clientFor: (grant: GrantRef): ToolCallClient => {
 				const known = this.#grants.find((g) => g.grantId === grant.grantId);
 				const client: RelayClient = {

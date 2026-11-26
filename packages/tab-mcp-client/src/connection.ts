@@ -8,11 +8,18 @@ import { pageIcons } from "./icons.ts";
 import type { CallHost, ConnectionHandle, ConnectionHost } from "./internal.ts";
 import { createMcpHandler, webMcpCall } from "./mcp.ts";
 import {
+	isCapabilityList,
+	isOtherTabMessage,
+	otherRelayMessage,
 	parseRelayMessage,
 	type RelayMessage,
+	type RelayMessageOut,
 	SUBPROTOCOL,
 	type TabMessage,
 } from "./protocol.ts";
+
+type Json = Record<string, unknown>;
+
 import type { RegisteredTool } from "./registry.ts";
 import { callContext, createTunnel, watchTools } from "./serve.ts";
 import type { DisconnectReason, SessionInfo } from "./types.ts";
@@ -308,8 +315,25 @@ export function openConnection(
 	},
 ): ConnectionHandle {
 	const revokeAll = options.revokeAll === true;
+	const extra = host.extra;
+	if (
+		extra !== undefined &&
+		(!isCapabilityList(extra.capabilities) ||
+			typeof extra.receive !== "function")
+	)
+		throw new TypeError(
+			"TabMcp: relayMessages needs at most 16 capabilities of 1-32 characters of a-z, 0-9, . and - (starting with a letter or digit) and a receive function",
+		);
 	const ws = new WebSocket(url, SUBPROTOCOL);
 	let state: "opening" | "ready" | "closed" = "opening";
+	/** `RelayMessages.receive`'s `send`: this session's, while it is open. */
+	const sendOther = (message: RelayMessageOut): boolean => {
+		if (!isOtherTabMessage(message))
+			throw new TypeError(
+				"TabMcp: relayMessages may not send a type the library sends itself",
+			);
+		return state === "ready" && send({ ...message });
+	};
 	let byeReason: DisconnectReason | undefined;
 	let maxChunk = 64 * 1024;
 	/** The relay's limit on a response body (CC 7); known once `session` came. */
@@ -345,7 +369,7 @@ export function openConnection(
 		handler.toolsChanged(),
 	);
 
-	function send(message: TabMessage): boolean {
+	function send(message: TabMessage | RelayMessageOut): boolean {
 		if (ws.readyState !== WebSocket.OPEN) return false;
 		try {
 			ws.send(JSON.stringify(message));
@@ -449,6 +473,10 @@ export function openConnection(
 				armHeartbeat();
 				siblings.claimed();
 				resolveReady(host.sessionStarted(message));
+				// As it came, extension fields (`signIn`) included (DEC-233).
+				// Read by the connection that is current: a replaced one is closed.
+				if (state === "ready")
+					extra?.receive(message as unknown as Json, sendOther);
 			} else if (message.type === "error") {
 				fail(
 					refused(
@@ -561,6 +589,9 @@ export function openConnection(
 					: { id: host.app, name: host.appName },
 			secret,
 			...(revokeAll ? { revokeAll: true } : {}),
+			...(extra !== undefined && extra.capabilities.length > 0
+				? { capabilities: [...extra.capabilities] }
+				: {}),
 		});
 	});
 	ws.addEventListener("message", (event: MessageEvent) => {
@@ -568,7 +599,19 @@ export function openConnection(
 		// A frame the tab cannot read is dropped without an answer (CC 15): the
 		// relay only logged one, and its request ends at its own timeout.
 		const message = parseRelayMessage(event.data);
-		if (message === undefined) return;
+		if (message === undefined) {
+			// A type the library does not speak: for `RelayMessages`, only
+			// once the session is there (DEC-233).
+			const other =
+				state === "ready" && extra !== undefined
+					? otherRelayMessage(event.data)
+					: undefined;
+			if (other !== undefined) {
+				armHeartbeat();
+				extra?.receive(other, sendOther);
+			}
+			return;
+		}
 		if (state === "ready") armHeartbeat(); // any traffic shows the link is alive
 		onMessage(message);
 	});
@@ -594,6 +637,7 @@ export function openConnection(
 	return {
 		ready,
 		send,
+
 		close(reason: DisconnectReason) {
 			if (state === "closed") return;
 			if (state === "opening") {

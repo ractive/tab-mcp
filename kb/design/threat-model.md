@@ -419,6 +419,20 @@ did, by connecting the extension.
 - **The extension's id** is the relay origin `chrome-extension://<id>`. The development
   build's key is kept out of the public repository, so nobody else can load an extension
   with the id the hosted relay allows; the Chrome Web Store keeps its own key.
+- **Signing in at the relay (DEC-233; the relay's side: DEC-231, DEC-232).** The
+  sign-in window (`identity.launchWebAuthFlow`) opens only an address of the relay in
+  use; the one-time code at its end goes back only over the extension's own connection.
+  Signing in grants (the group's AI apps reach this browser from then on), so its
+  buttons wait 750 ms after they came or moved (ES 5). A browser that joins the group is
+  announced in every panel and with a notification, also one that joined while this
+  browser was off (the member ids it saw are kept): the user's way to notice an account
+  taken over at the provider or a code handed to a stranger, and to remove that browser;
+  the extension cannot prevent either. A member is a man in the middle of the group's
+  calls (it can pin a tab or claim the focus, see the arguments, answer falsely); a call
+  without `tab` that reaches this browser while the pin is in another runs nothing, and
+  the panel names the browser calls go to. In mode "the tab in front" the relay learns
+  when a window of this browser gains the focus (nothing of the page); in mode "a pinned
+  tab" nothing. The account's name and Microsoft's kind stay in the extension's IndexedDB.
 - **Who may send what (iteration 26).** The connection lives in the service worker,
   which content scripts in every granted tab can message too. Commands (connect, turn
   off, pairing, disconnect an app, disconnect all apps, the relay, the "Always allow" switches,
