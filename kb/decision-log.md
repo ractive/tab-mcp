@@ -5945,3 +5945,22 @@ Against the draft of 24 November 2026 (`registerTool` steps, WebIDL of
 - **Not here:** the tab-mcp browser extension's own `document.modelContext` (Firefox,
   Chrome without WebMCP) copies Chrome 156, not the draft; moving it to the draft is its
   own change.
+
+## DEC-229: signed-in browsers form one group per account (owner)
+
+2026-11-26, [iteration 53](/iterations/iteration-53-signed-in-browsers.md) (planned). The
+owner runs eight copies of the extension (Chrome and Firefox, a personal and a work
+profile each, under two macOS users) and pairs each with every AI app, again every 90
+days. Decided in the conversation:
+
+- The extension can sign in at the relay with Google, GitHub or Microsoft (personal and
+  Entra ID work accounts); every browser signed in with the same account is one group,
+  and an AI app that signs in on the pairing page gets one grant for the group. Chosen
+  over linking codes between browsers: "a nicer design".
+- Codes stay for people who do not want to sign in; such a browser is on its own.
+- No linking of accounts across providers for now.
+- Backwards compatible: existing addresses, grants, extensions and relays keep working.
+- One mode per group, "the tab in front" (default) or "a pinned tab"; the target changes
+  on purpose (`use_tab`, "Work here"), never as a side effect of switching tabs or
+  browsers. `list_tabs`, `use_tab` and an optional `tab` argument.
+- The owner registers the OAuth apps at the three providers.
