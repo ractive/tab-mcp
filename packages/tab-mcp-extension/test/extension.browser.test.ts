@@ -1427,6 +1427,56 @@ describe.skipIf(chrome === undefined)("the test build (host access)", () => {
 		});
 		await waitForTools(stack, (n) => !n.includes("page_get_greeting"));
 	});
+
+	test("a pinned tab stays where calls go across a tab switch; list_tabs names the tabs; tab reaches another one and leaves the pin (DEC-230)", async () => {
+		// This tab with the tools, the other one without.
+		const other = await stack.browser.newPage(`${OTHER}/plain.html`);
+		await other.activate();
+		const listed = (await call(stack, "list_tabs")).structuredContent as {
+			mode: string;
+			tabs: { tab: string; url: string; inFront?: true }[];
+		};
+		expect(listed.mode).toBe("the tab in front");
+		const shop = listed.tabs.find((t) => t.url === `${SITE}/webmcp.html`);
+		const plain = listed.tabs.find((t) => t.url === `${OTHER}/plain.html`);
+		expect(plain?.inFront).toBe(true);
+		if (shop === undefined) throw new Error("the shop's tab is not listed");
+		// use_tab pins it and switches the setting; the panel says so.
+		const used = await call(stack, "use_tab", { tab: shop.tab });
+		expect(used.structuredContent).toMatchObject({
+			tab: shop.tab,
+			pinned: true,
+			url: `${SITE}/webmcp.html`,
+		});
+		await stack.panel.waitFor(
+			`document.getElementById("target-line").textContent.endsWith("(pinned)") && document.getElementById("target-mode").value === "pinned"`,
+		);
+		// The other tab is still in front: calls go to the pinned one, its
+		// page tools are offered.
+		expect((await pageInfo(stack)).structuredContent).toMatchObject({
+			url: `${SITE}/webmcp.html`,
+		});
+		await waitForTools(stack, (n) => n.includes("page_get_greeting"));
+		const greeting = await call(stack, "page_get_greeting", { name: "Ada" });
+		expect(greeting.isError).toBeFalsy();
+		// The tab argument reaches the tab in front, and the pin stays.
+		expect(
+			(await call(stack, "page_info", { tab: plain?.tab })).structuredContent,
+		).toMatchObject({ url: `${OTHER}/plain.html` });
+		expect((await pageInfo(stack)).structuredContent).toMatchObject({
+			url: `${SITE}/webmcp.html`,
+		});
+		// Back to the tab in front: the pin goes.
+		await stack.panel.eval(
+			`(() => { const s = document.getElementById("target-mode"); s.value = "front"; s.dispatchEvent(new Event("change")); })()`,
+		);
+		await stack.panel.waitFor(
+			`document.getElementById("target-line").textContent === "AI apps work in: the tab in front"`,
+		);
+		expect((await pageInfo(stack)).structuredContent).toMatchObject({
+			url: `${OTHER}/plain.html`,
+		});
+	});
 });
 
 describe.skipIf(chrome === undefined)(
