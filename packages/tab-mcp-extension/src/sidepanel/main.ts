@@ -383,6 +383,16 @@ let quietUntil = 0;
 const quiet = (): boolean => Date.now() < quietUntil;
 /** The button over the tool list as last shown: its visibility, label and tools. */
 let allowAllShown = "";
+/**
+ * The tab the panel shows, and whether its tools were read since it came to
+ * the front (the worker gives `origin` once they were). The list that comes
+ * with a switch to another tab waits as any other (a page can time a switch:
+ * a tab it opened closes itself, and its opener comes to the front; it can
+ * hold back its first read), but unseen, as after the dialog: the switches
+ * show at once whether they are on (DEC-228).
+ */
+let shownTab: number | undefined;
+let toolsRead = false;
 
 function showQuestions(questions: QuestionSummary[], expired: string[]): void {
 	const ids = new Set(questions.map((q) => q.id));
@@ -693,10 +703,19 @@ function showTab(s: PanelState): void {
 	// The page changed what the switch over the list is for (other tools, so
 	// also on or off, or it just came): it and the switches below wait, so a
 	// click meant to turn it off cannot turn on a tool the page just added.
-	// Not when only the user's own click turned it: that would flicker.
+	// Not when only the user's own click turned it: that would flicker. The
+	// list that comes with a switch to another tab waits unseen.
+	if (tab?.tabId !== shownTab) {
+		shownTab = tab?.tabId;
+		toolsRead = false;
+	}
+	const switched = !toolsRead;
+	if (tab?.origin !== undefined) toolsRead = true;
 	const shownAs = JSON.stringify([allowAll.shown, allowAll.names]);
 	if (allowAll.shown && shownAs !== allowAllShown) {
-		movedUntil = Date.now() + ALLOW_DELAY_MS;
+		if (switched)
+			quietUntil = Math.max(quietUntil, Date.now() + ALLOW_DELAY_MS);
+		else movedUntil = Date.now() + ALLOW_DELAY_MS;
 		arm();
 	}
 	allowAllShown = shownAs;
