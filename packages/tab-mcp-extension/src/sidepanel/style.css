@@ -511,6 +511,22 @@ input:is([type="text"], [type="url"]) {
 	color: var(--ink);
 }
 
+/*
+ * The tab can be read and offers no tools: a note on a wash, framed so it is not
+ * missed, but in ink, not the warning's colours: nothing is wrong (DEC-234).
+ */
+.tab-note {
+	padding: 10px var(--s3);
+	border: 1px solid var(--edge);
+	border-radius: var(--r-card);
+	background: var(--wash);
+	color: var(--ink);
+}
+
+.tab-note p + p {
+	margin-top: var(--s1);
+}
+
 /* The extension's own icon in the line that asks for a click on it. */
 .inline-icon {
 	width: 16px;

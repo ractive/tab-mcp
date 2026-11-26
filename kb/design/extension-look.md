@@ -136,7 +136,8 @@ icon are three more hex values in `worker/connection.ts`.
   `--wash`. No coloured glow; it is on top and the only sheet with an edge.
 - **Notices**: "This address is in use elsewhere" (`#replaced`) is the warning
   notice; a problem (`#problem`, `#relay-problem`) is the red one, with its text in
-  `--ink`.
+  `--ink`. A page without tools (`#no-tools`) is a plain note: `--wash` fill, `--edge`,
+  first sentence bold (DEC-234).
 
 ### Adapted
 
