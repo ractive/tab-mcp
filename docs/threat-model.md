@@ -35,10 +35,13 @@ See the [protocol](protocol.md) for the details.
    real page once that is connected again (A4).
 5. **A pairing code while it is valid.** The address is the same for every page of an
    app, so the code alone decides which page an AI app is paired with (A1).
-6. **The token store** (a SQLite file by default): token hashes and grant details.
-7. **The user's attention:** pairing dialogs and confirmations must not be spammed or
+6. **The token store** (a SQLite file by default): token hashes and grant details, and
+   with browser sign-in the bindings: a hash of each signed-in account, the browsers'
+   labels and when they signed in (A16).
+7. **A browser's sign-in:** its place in its account's group (A16).
+8. **The user's attention:** pairing dialogs and confirmations must not be spammed or
    confusing.
-8. **The relay's availability** and its operator's bill.
+9. **The relay's availability** and its operator's bill.
 
 ## Who sees what
 
@@ -49,6 +52,7 @@ See the [protocol](protocol.md) for the details.
 | The AI app | the tools it may call and their results | following the user's intent (a model drives it) |
 | The model provider behind the AI app | the same as the AI app | nothing |
 | A WebMCP caller: an agent in the browser, another extension, an `exposedTo` origin (unless the page sets `webmcp: false`, A14) | the tools the page mirrors into WebMCP and their results | nothing |
+| Another browser signed in with the same account (A16) | the group's labels, member ids, sign-in times and who is online; nothing of the other browsers' tabs | nothing; it can rename or remove the others |
 | The network | nothing: TLS everywhere, `wss:` and `https:` only outside development | nothing |
 
 The relay cannot be made blind. The AI app speaks HTTPS to the relay, and the relay must
@@ -491,6 +495,12 @@ attacks.
   cap per page and no request is preferred for its page; a party that fills the total
   from many networks with one request each pushes requests out in the order they came
   (A1).
+- **Browser sign-ins** (A16): 5 starts per session and 20 per network, then one every
+  30 s each; one open sign-in per session, 3 not yet opened per network (one that
+  nobody opened ends with its session, so filling the 10 000 in all takes opening each
+  link), each 10 minutes; views of
+  the sign-in URL and its callback per network, 60, then one a second; 16 members per
+  group.
 - **Control messages from a tab** (everything but `pong` and the `http.response*`
   answers) have a budget per session: 30, then 2 a second. Past it the relay sends
   `rate_limited` and closes with 4008. A second "revoke all" of a page within a
@@ -1087,6 +1097,99 @@ sits beside the AI apps of A2 and A6 and the WebMCP callers of A14.
 - **Nothing is stored.** A `TabMcp` without `relay` creates no address secret and opens
   no `BroadcastChannel` or WebSocket.
 
+### A16: Signed-in browsers and their groups
+
+A browser extension can sign in at the relay with Google, Microsoft or GitHub
+(`TAB_MCP_SIGN_IN_APPS`, DEC-231). The relay binds the extension's address id to the
+account; every browser bound to one account is a member of that account's group, and the
+members see each other's labels and who is online, and can rename and remove each other
+([protocol](protocol.md#browser-sign-in)). Routing an AI app's calls to a group is not
+built yet; once it is, a group's members are what an AI app connected to the group
+reaches.
+
+- **An account taken over reaches the group.** Whoever can sign in to the account at the
+  provider can sign a browser of their own into the group: it is then a member like the
+  owner's. Every member sees it join (its label, online), and any member can remove it;
+  it can also remove the owner's browsers, which may sign in again. Once AI apps connect
+  to a group, such a member can receive their calls and answer them. The provider's own
+  protection of the account (a second factor, Conditional Access for work accounts) is
+  what stands in front of it.
+- **Someone else's sign-in link.** The relay's URL from `signin.url` works once, for
+  10 minutes, and belongs to the session that asked for it. Someone who gets a user to
+  open their link (sent as "sign in to tab-mcp") and to finish the provider's sign-in
+  gets nothing from it unless the user also hands them the code: the relay binds only
+  when the extension hands back the
+  completion code of the redirect URL (`signin.complete`), and that URL
+  (`*.chromiumapp.org`, `*.extensions.allizom.org`) is never loaded by a browser; only
+  the `launchWebAuthFlow` that the extension started sees it. In the user's browser the
+  code stays in the address bar of a page that does not load. The stranger's session is
+  told nothing, nothing is bound, and the user's display name never leaves the relay.
+  A code works once, for 2 minutes, and only for the session whose sign-in made it.
+  Besides, a link that someone else has already opened is refused, and a sign-in that
+  comes back in another browser than the one that opened the link (its cookie missing)
+  ends on an error page.
+  The stranger's way in is then to get the user to send them the address they land on
+  (the pattern known as ConsentFix): with the code, the stranger's session (a script
+  that claims an extension's origin can be one) completes the sign-in, and the
+  stranger's browser joins the user's group, sees the user's display name and the
+  members, and can rename and remove them. Against it, a link opened from another
+  network than the session's (the relay's network key: an IPv4 address, an IPv6 /56)
+  first shows a page of the relay that names the browser's label and the app, says
+  "Only continue if you started this yourself in the tab-mcp panel of that browser." and
+  warns never to paste or send the address one lands on to anyone. Only its Continue,
+  a form post with the page's single-use token and the sign-in's cookie, goes on to the
+  provider; a link alone does not get past it. The relay logs whether the link and the
+  callback came from the session's network. Left over, plainly: a user who reads past
+  the page and sends the code within its 2 minutes lets the stranger in; a stranger on
+  the user's own network (the same office, the same household's address) gets no page
+  at all; and the network check says nothing about who is behind it.
+- **Mix-up and replay.** Each flow has its own `state` (with the provider in it, so the
+  callback knows which provider's code it is), PKCE S256 and, for OpenID Connect, a
+  `nonce`; the code is redeemed at the provider the flow started with, and the ID token
+  is checked as for identity binding (A12). Microsoft's multi-tenant issuer is checked
+  against the token's own `tid` (a GUID), so a token whose issuer names another tenant,
+  or the template, is refused. GitHub has no ID token: the code is exchanged with the
+  relay's secret and PKCE, and the access token is used once for `GET /user` and
+  dropped.
+- **The redirect URL.** The relay sends the browser back only to the extension's own
+  redirect URL: for a Chrome or Edge page `https://<its id>.chromiumapp.org/`, for a
+  Firefox page `https://<40 hex digits>.extensions.allizom.org/` (Firefox's
+  per-installation origin does not show which one is the extension's own, so any
+  extension's is accepted there). The URL carries the completion code (`signin=`) or a
+  reason (`signin_error=`) and nothing else; the display name goes to the session over
+  its WebSocket, after `signin.complete`. On Firefox another extension's redirect URL is
+  accepted, but that extension's `launchWebAuthFlow` did not start this sign-in, so the
+  URL ends in no extension's hands and its code is useless to the session's holder
+  unless they get it some other way.
+- **Who can sign in.** Only sessions of the configured apps, only from an extension's
+  origin, and only when the session asks for it in `hello`. A Firefox extension's app
+  cannot be reserved (`moz-extension://*`, A11, A13), so any Firefox extension can name
+  `tab-mcp-extension-firefox` and offer sign-in to its user, who then puts it in their
+  group. The relay cannot tell extensions apart there; the group shows it.
+- **A member is not a caller.** A member learns its group's labels, member ids, sign-in
+  times and who is online; never another member's address id, tabs, grants or display
+  name. Member ids are random. Any member can rename or remove any other: one member can
+  annoy the others (rename them, sign them out), which the group sees. No member can do
+  more to another than end its sign-in. A rename or removal is checked against the
+  sender's own binding in the store first, so a browser that was removed meanwhile can
+  no longer act; a browser removed while it connects is told once it is connected.
+- **What the relay keeps.** A hash (SHA-256) of a fixed prefix, the provider and the
+  account's stable id, not keyed with a relay secret (the relay has none). A copy of the
+  store can therefore be checked against a guessed account: GitHub's user ids are public,
+  so whoever has the file can find out which public GitHub accounts signed in (not which
+  browser: the address id is a hash too). Google's and Microsoft's ids are not public.
+  No e-mail address, user name or display name is stored or logged.
+- **Lifetime.** A sign-in lasts 90 days from the sign-in (as a grant, DEC-062), then the
+  browser must sign in again; signing out or being removed ends it at once.
+- **Limits.** Sign-in starts per session (5, then one every 30 s) and per network (20,
+  then one every 30 s), one open sign-in per session, 3 not yet opened per network
+  (one that nobody opened ends with its session), 10 000 in all, page views of the
+  relay's sign-in URL and its callback per network (60, then one a second), 16 members
+  per group, and the control budget of every session (A8).
+- **Older extensions are not affected.** A session that does not ask for sign-in in its
+  `hello` gets no message of it and is answered as before; the relay does not read its
+  binding.
+
 ## Safe defaults
 
 - No page origin is allowed until configured; `*` only explicitly, with a warning.
@@ -1166,6 +1269,13 @@ each default.
 
 - With identity binding: a taken-over account at the provider, a leaked assertion key or
   a web app that vouches for the wrong user (A12).
+- With browser sign-in: a taken-over account at Google, Microsoft or GitHub puts a
+  browser of its own into the account's group. Every member sees the new member and can
+  remove it; any member can also rename or remove the others. So does a stranger whose
+  sign-in link a user finishes and who then gets the address the user landed on within
+  2 minutes; the relay's page warns where the link was opened from another network,
+  not from the same one. A copy of the store tells which public GitHub accounts signed
+  in (A16).
 - With the tab-mcp browser extension: a tool that runs without asking (marked read-only by the page,
   or with its "Always allow" switch on for its site) does whatever the AI app asks of it, and another program on
   the computer can click a notification or the side panel (A13).

@@ -34,6 +34,7 @@ import {
 	type RelayMessage,
 	type TabMessage,
 } from "./protocol.ts";
+import type { BrowserSignIn, Membership } from "./signin/browser.ts";
 import { StoreFailure } from "./store/guard.ts";
 import type { TokenStore } from "./store/types.ts";
 import { newId } from "./tokens.ts";
@@ -76,6 +77,8 @@ export interface SessionHost {
 	readonly pairingCodeTtlMs?: number;
 	/** How long an open `oidc` dialog counts (tests shorten it). */
 	readonly pairingWindowMs?: number;
+	/** Browsers' sign-in (DEC-231), when the relay offers it. */
+	readonly signIn?: BrowserSignIn;
 }
 
 /** One MCP request for the tab: always `POST /mcp` (protocol: tunnelled MCP requests). */
@@ -198,6 +201,24 @@ export class TabSession {
 	 * nobody is bound, AI apps are told to try again rather than to sign in.
 	 */
 	identityUnchecked = false;
+	/**
+	 * The session named `signin.v1` in its `hello` and its app may sign in
+	 * (DEC-231): only then does it get the sign-in and group messages.
+	 */
+	signInOffered = false;
+	/**
+	 * The browser's place in its account's group, while it is signed in. A
+	 * signed-in browser is of use to its group: it is not closed early as
+	 * unpaired (DEC-097).
+	 */
+	get member(): Membership | undefined {
+		return this.#member;
+	}
+	set member(member: Membership | undefined) {
+		this.#member = member;
+		if (member !== undefined) this.#used = true;
+	}
+	#member: Membership | undefined;
 	readonly pending: Map<string, Exchange> = new Map();
 	/**
 	 * The grants the page was told of (`session`, `grant.added`) and not
@@ -224,6 +245,8 @@ export class TabSession {
 	 */
 	#dialogOpenUntil = 0;
 	#identityChain: Promise<void> = Promise.resolve();
+	/** Sign-in messages and bindings, one after another (DEC-231). */
+	#signInChain: Promise<unknown> = Promise.resolve();
 	/** Tokens of the control budget (`CONTROL_BURST`, `CONTROL_PER_SECOND`). */
 	#controlTokens = CONTROL_BURST;
 	#controlAt = Date.now();
@@ -328,7 +351,7 @@ export class TabSession {
 			);
 			return;
 		}
-		const parsed = parseTabMessage(data);
+		const parsed = parseTabMessage(data, { signIn: this.signInOffered });
 		// Every frame but the answers to pings and requests counts against the
 		// control budget; past it the session ends with 4008 (RS 3).
 		const exempt =
@@ -401,10 +424,12 @@ export class TabSession {
 	/** Take one token of the control budget; false when it is used up. */
 	#takeControl(): boolean {
 		const now = Date.now();
+		// A clock that steps back (a correction) refills nothing, and never
+		// takes tokens away: that would end a quiet session with 4008.
+		const elapsed = Math.max(0, now - this.#controlAt);
 		this.#controlTokens = Math.min(
 			CONTROL_BURST,
-			this.#controlTokens +
-				((now - this.#controlAt) / 1000) * CONTROL_PER_SECOND,
+			this.#controlTokens + (elapsed / 1000) * CONTROL_PER_SECOND,
 		);
 		this.#controlAt = now;
 		if (this.#controlTokens < 1) return false;
@@ -423,6 +448,7 @@ export class TabSession {
 				msg.library,
 				msg.app,
 				msg.revokeAll === true,
+				msg.capabilities ?? [],
 			);
 			return;
 		}
@@ -463,6 +489,27 @@ export class TabSession {
 			case "identity.logout":
 				await this.#serialIdentity(() => this.#host.signOut(this));
 				return;
+			case "signin.start":
+			case "signin.complete":
+			case "signin.out":
+			case "member.rename":
+			case "member.remove": {
+				// Parsed as such only while `signInOffered` (`parseTabMessage`).
+				const signIn = this.#host.signIn;
+				if (signIn === undefined) return;
+				await this.#serialSignIn(() =>
+					msg.type === "signin.start"
+						? signIn.start(this, msg.provider, msg.redirectUrl, msg.label)
+						: msg.type === "signin.complete"
+							? signIn.complete(this, msg.code)
+							: msg.type === "signin.out"
+								? signIn.signOut(this)
+								: msg.type === "member.rename"
+									? signIn.rename(this, msg.member, msg.label)
+									: signIn.remove(this, msg.member),
+				);
+				return;
+			}
 			case "grant.revoke":
 				try {
 					if (!(await this.#host.revokeGrant(this, msg.grantId))) {
@@ -509,7 +556,8 @@ export class TabSession {
 		secret: string,
 		library: { name: string; version: string },
 		app: { id: string; name?: string },
-		revokeAll = false,
+		revokeAll: boolean,
+		capabilities: readonly string[],
 	): Promise<void> {
 		if (!isWellFormedSecret(secret)) {
 			this.#protocolError(
@@ -592,6 +640,15 @@ export class TabSession {
 		if (grants.length > 0) this.#used = true;
 		for (const g of grants) this.#grantIds.add(g.grantId);
 
+		// Sign-in only for a tab that asked for it: any other `hello` gets
+		// today's answer, byte for byte, and no store read more (DEC-231).
+		const signIn = this.#host.signIn;
+		this.signInOffered = signIn?.offers(app.id, capabilities) === true;
+		if (signIn !== undefined && this.signInOffered) {
+			await signIn.attach(this);
+			if (this.#state !== "hello") return;
+		}
+
 		const limits = this.limits;
 		const expiresAt = this.openedAt + limits.sessionLifetimeMs;
 		this.#state = "ready";
@@ -605,6 +662,16 @@ export class TabSession {
 			expiresAt: new Date(expiresAt).toISOString(),
 			limits: limitsOf(limits),
 			grants,
+			...(signIn !== undefined && this.signInOffered
+				? {
+						signIn: {
+							providers: signIn.providerList(),
+							...(this.member === undefined
+								? {}
+								: { member: this.member.memberId }),
+						},
+					}
+				: {}),
 		});
 		if (!sent) {
 			this.end(CloseCode.policyViolation, "send failed");
@@ -630,8 +697,31 @@ export class TabSession {
 			...(appNameDropped && this.site.name === undefined
 				? { appNameDropped: true }
 				: {}),
+			...(this.signInOffered ? { signIn: true } : {}),
 		});
 		this.#host.ready(this);
+		if (signIn !== undefined && this.signInOffered) {
+			this.#serialSignIn(() => signIn.connected(this)).catch(
+				(error: unknown) => {
+					this.#host.logger.error("tab.handler_error", {
+						session: this.sessionId,
+						type: "signin.connected",
+						...errorFields(error),
+					});
+				},
+			);
+		}
+	}
+
+	/**
+	 * This session's sign-in work, one step after another in the order it
+	 * came: its `signin.*` and `member.*` messages, and the check of its
+	 * binding when it connects (DEC-231), as identity messages are.
+	 */
+	#serialSignIn<T>(run: () => Promise<T>): Promise<T> {
+		const next = this.#signInChain.then(run);
+		this.#signInChain = next.catch(() => {});
+		return next;
 	}
 
 	/**
@@ -806,6 +896,7 @@ export class TabSession {
 		// Released first, so a request the relay sends again waits for the next
 		// session instead of finding this one.
 		this.#host.released(this);
+		if (this.signInOffered) this.#host.signIn?.released(this);
 		for (const exchange of [...this.pending.values()]) exchange.tabGone();
 		if (wasReady) {
 			this.#host.logger.info("tab.closed", {
@@ -840,7 +931,15 @@ export class TabSession {
 			message,
 			for: about.type,
 			...(about.type === "grant.revoke" ? { grantId: about.grantId } : {}),
+			...(about.type === "member.rename" || about.type === "member.remove"
+				? { member: about.member }
+				: {}),
 		});
+	}
+
+	/** An `error` that answers no message in particular. */
+	sendError(code: ErrorCode, message: string): void {
+		this.#sendError(code, message);
 	}
 
 	#protocolError(code: ErrorCode, message: string): void {

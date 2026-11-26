@@ -9,6 +9,38 @@ All notable changes to the relay `@ractive-ch/tab-mcp`, released with the Git ta
 The relay. Each relay release is also a Docker image, `ractive/tab-mcp` and
 `ghcr.io/ractive/tab-mcp`, tagged with the version.
 
+## Unreleased
+
+### Added
+
+- Browser sign-in (DEC-231): the tab-mcp browser extension can sign in at the relay with
+  Google, Microsoft (personal and work accounts) or GitHub, and every browser signed in
+  with one account is a member of that account's group (at most 16). The relay sends the
+  group's members, their labels and who is online to every member; any member can rename
+  or remove any member. A sign-in lasts 90 days. The relay binds a browser only when the
+  extension itself hands back the completion code of the sign-in's redirect URL
+  (`signin.complete`), so someone else's sign-in link finished in another person's
+  browser binds nothing unless they also send its code on; a link opened from another
+  network than its browser's first shows a page that warns, with Continue and Cancel.
+  For Microsoft the relay says whether the account is personal or
+  work (`kind`): one address can name both. The relay keeps a hash of the account,
+  never the e-mail address or the user name. Settings: `TAB_MCP_SIGN_IN_APPS` and
+  `TAB_MCP_SIGN_IN_{GOOGLE,MICROSOFT,GITHUB}_CLIENT_ID` and `_CLIENT_SECRET`; every
+  provider uses the callback `<public URL>/authorize/callback`, which identity binding
+  keeps using unchanged. New in the protocol: `hello.capabilities`, `session.signIn`, and
+  the `signin.*`, `group` and `member.*` messages, only for a session that names
+  `signin.v1` in its `hello`. Every other session, every extension released so far
+  among them, gets exactly the answers it got before.
+- The token store has optional binding methods (`putBinding`, `getBinding`,
+  `listBindings`, `renameBinding`, `deleteBinding`), with conformance tests; a relay with
+  sign-in refuses to start with a store that lacks them.
+
+### Changed
+
+- The SQLite store is at schema 7: a `bindings` table. The tokens stay as they are, and
+  older relays of schema 6 (since the fixed address, DEC-196) can still open the file;
+  they leave the table alone.
+
 ## [0.13.3][relay-0.13.3] - 2026-11-23
 
 ### Changed

@@ -14,6 +14,9 @@ export {
 	type PairingKind,
 	type RelayConfig,
 	resolveConfig,
+	type SignInClient,
+	type SignInConfig,
+	type SignInProviderId,
 	type StoreKind,
 	type SubjectClaim,
 	type TrustProxy,
@@ -26,7 +29,7 @@ export {
 	type LogFields,
 	type Logger,
 } from "./log.ts";
-export { SUBPROTOCOL } from "./protocol.ts";
+export { SIGN_IN_CAPABILITY, SUBPROTOCOL } from "./protocol.ts";
 export {
 	type CreateRelayOptions,
 	createRelay,
@@ -36,6 +39,8 @@ export {
 export { MemoryTokenStore } from "./store/memory.ts";
 export { SqliteTokenStore } from "./store/sqlite.ts";
 export type {
+	BindingRecord,
+	BindingSelector,
 	GrantSummary,
 	RevokeOptions,
 	RevokeSelector,

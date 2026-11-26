@@ -283,6 +283,24 @@ describe("identity binding: the same person connects without a code", () => {
 		expect(await again.text()).toContain('"text":"3"');
 	});
 
+	test("DEC-231: with browser sign-in configured, identity binding's callback works as before", async () => {
+		const ctx = await setup({
+			signIn: {
+				apps: ["tab-mcp-extension"],
+				providers: { github: { clientId: "gh", clientSecret: "gh-secret" } },
+			},
+		});
+		const token = await pairedToken(ctx);
+		const res = await mcpPost(ctx.address, add(), { token });
+		expect(await res.text()).toContain('"text":"3"');
+		// A state the relay does not know, of neither kind, is identity binding's.
+		const stale = await ctx.browser.open(
+			`${ctx.r.url}/authorize/callback?state=unknown&code=x`,
+		);
+		expect(stale.status).toBe(400);
+		expect(stale.html).toContain("Start again from your AI app");
+	});
+
 	test("Connect asks no page: with none open, one signed out or one with its dialog closed, the form and the redirect are the same", async () => {
 		const r = await relay();
 		const visit: Visit = {

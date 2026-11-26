@@ -16,6 +16,22 @@ import { MAX_JWT_BYTES } from "./jwt.ts";
 
 export const SUBPROTOCOL = "tab-mcp.v1";
 
+/**
+ * The capability a tab names in `hello.capabilities` to get the sign-in
+ * and group messages (DEC-231). A session that does not name it gets none of
+ * them, and its `signin.*` and `member.*` messages are unknown types, as
+ * before. A later, incompatible form of these messages gets a new name
+ * (`signin.v2`), offered beside this one during a transition.
+ */
+export const SIGN_IN_CAPABILITY = "signin.v1";
+
+/** Most capabilities in one `hello`; each is 1-32 of `a-z`, `0-9`, `.`, `-`. */
+export const MAX_CAPABILITIES = 16;
+const CAPABILITY = /^[a-z0-9][a-z0-9.-]{0,31}$/;
+
+/** The longest member label (as an app name). */
+export const MAX_LABEL: number = MAX_APP_NAME;
+
 /** The only MCP revision the relay serves (DEC-033). */
 export const MCP_PROTOCOL_VERSION = "2026-07-28";
 
@@ -76,6 +92,84 @@ export interface SessionMessage {
 	expiresAt: string;
 	limits: Limits;
 	grants: GrantInfo[];
+	/**
+	 * The providers this browser can sign in with (DEC-231): only to a session
+	 * that named `signin.v1` and whose app may sign in.
+	 */
+	signIn?: {
+		providers: { id: string; name: string }[];
+		/** This browser's member id, while it is signed in (a `group` message follows). */
+		member?: string;
+	};
+}
+/** The URL to open for a sign-in (`identity.launchWebAuthFlow`), single use. */
+export interface SignInUrlMessage {
+	type: "signin.url";
+	provider: string;
+	url: string;
+	expiresAt: string;
+}
+/** The browser is signed in and a member of its account's group. */
+export interface SignInDoneMessage {
+	type: "signin.done";
+	provider: string;
+	/** "Signed in as …": the e-mail address, user name or login. Not kept by the relay. */
+	displayName: string;
+	/**
+	 * Microsoft only: a personal account (the consumer tenant) or a work or
+	 * school one. The same address can name one of each, and both show it.
+	 */
+	kind?: "personal" | "work";
+	/** This browser's member id in the group. */
+	member: string;
+}
+export type SignInFailure =
+	| "not_offered"
+	| "bad_redirect"
+	| "rate_limited"
+	| "busy"
+	| "provider_unavailable"
+	| "code_refused"
+	| "group_full"
+	| "store_unavailable";
+/**
+ * Why a sign-in came back without a completion code: the reason in the
+ * redirect URL (`signin_error`), which only the extension sees.
+ */
+export type SignInRedirectError =
+	| "provider_error"
+	| "unchecked"
+	| "session_gone"
+	| "cancelled";
+export interface SignInFailedMessage {
+	type: "signin.failed";
+	provider?: string;
+	reason: SignInFailure;
+	message: string;
+}
+/** The browser's sign-in ended: signed out here, removed by a member, or 90 days over. */
+export interface SignInEndedMessage {
+	type: "signin.ended";
+	reason: "signed_out" | "removed" | "expired";
+}
+export interface GroupMember {
+	id: string;
+	label: string;
+	online: boolean;
+	/** When the member signed in. */
+	signedInAt: string;
+}
+/** The group's state, to every member when it changes and when a member connects. */
+export interface GroupMessage {
+	type: "group";
+	provider: string;
+	/** This browser's member id. */
+	self: string;
+	/** When this browser's sign-in ends unless it signs in again. */
+	expiresAt: string;
+	maxMembers: number;
+	/** Every member, oldest first, this browser included. */
+	members: GroupMember[];
 }
 export interface PingMessage {
 	type: "ping";
@@ -152,12 +246,17 @@ export interface ErrorMessage {
 	for?: ErrorAnswers;
 	/** With `for: "grant.revoke"`: the grant of that message. */
 	grantId?: string;
+	/** With `for: "member.rename"` or `"member.remove"`: the member of that message. */
+	member?: string;
 }
 /** The page's messages an `error` can name in `for`. */
 export type ErrorAnswers =
 	| "grant.revoke"
 	| "grants.revokeAll"
-	| "identity.logout";
+	| "identity.logout"
+	| "signin.out"
+	| "member.rename"
+	| "member.remove";
 export type RelayMessage =
 	| SessionMessage
 	| PingMessage
@@ -169,6 +268,11 @@ export type RelayMessage =
 	| GrantAddedMessage
 	| GrantRemovedMessage
 	| IdentityBoundMessage
+	| SignInUrlMessage
+	| SignInDoneMessage
+	| SignInFailedMessage
+	| SignInEndedMessage
+	| GroupMessage
 	| ErrorMessage;
 
 export type ErrorCode =
@@ -199,6 +303,34 @@ export interface HelloMessage {
 	 * from whoever took it over (DEC-095).
 	 */
 	revokeAll?: boolean;
+	/** What the tab understands beyond the base protocol, e.g. `signin.v1` (DEC-231). */
+	capabilities?: string[];
+}
+/** Start a sign-in with a provider (DEC-231); answered with `signin.url` or `signin.failed`. */
+export interface SignInStartMessage {
+	type: "signin.start";
+	provider: string;
+	/** `identity.getRedirectURL()`: where the relay sends the browser at the end. */
+	redirectUrl: string;
+	/** The member's label in the group, e.g. "Chrome on macOS". */
+	label?: string;
+}
+/** Hand back the completion code of the redirect URL: only then is the browser bound. */
+export interface SignInCompleteMessage {
+	type: "signin.complete";
+	code: string;
+}
+export interface SignInOutMessage {
+	type: "signin.out";
+}
+export interface MemberRenameMessage {
+	type: "member.rename";
+	member: string;
+	label: string;
+}
+export interface MemberRemoveMessage {
+	type: "member.remove";
+	member: string;
 }
 export interface PongMessage {
 	type: "pong";
@@ -264,6 +396,11 @@ export type TabMessage =
 	| GrantsRevokeAllMessage
 	| IdentityMessage
 	| IdentityLogoutMessage
+	| SignInStartMessage
+	| SignInCompleteMessage
+	| SignInOutMessage
+	| MemberRenameMessage
+	| MemberRemoveMessage
 	| PongMessage
 	| ByeMessage
 	| HttpResponseMessage
@@ -325,11 +462,36 @@ function idOf(v: Json): string | undefined {
 	return isId(v["id"]) ? v["id"] : undefined;
 }
 
+export interface ParseOptions {
+	/**
+	 * The session offers sign-in (DEC-231): `signin.*` and `member.*` are
+	 * messages. Otherwise they are unknown types, as for a relay without them.
+	 */
+	signIn?: boolean;
+}
+
+/** The sign-in messages, known only to a session that offers sign-in. */
+const SIGN_IN_TYPES: ReadonlySet<string> = new Set([
+	"signin.start",
+	"signin.complete",
+	"signin.out",
+	"member.rename",
+	"member.remove",
+]);
+
+/** A label as sent: 1-64 characters without control characters (cleaned later). */
+function isLabel(v: unknown): v is string {
+	return isAppName(v) && v.length <= MAX_LABEL;
+}
+
 /**
  * Parse and validate one text frame from the tab. Hand-written on purpose: the
  * relay has no schema library (DEC-014).
  */
-export function parseTabMessage(text: string): ParseResult {
+export function parseTabMessage(
+	text: string,
+	options: ParseOptions = {},
+): ParseResult {
 	let v: unknown;
 	try {
 		v = JSON.parse(text);
@@ -344,6 +506,11 @@ export function parseTabMessage(text: string): ParseResult {
 	const id = idOf(v);
 	const bad = (error: string): ParseResult =>
 		id === undefined ? { ok: false, error } : { ok: false, error, id };
+	if (SIGN_IN_TYPES.has(type) && options.signIn !== true) {
+		return id === undefined
+			? { ok: true, unknown: true, type }
+			: { ok: true, unknown: true, type, id };
+	}
 
 	switch (type) {
 		case "hello": {
@@ -369,6 +536,19 @@ export function parseTabMessage(text: string): ParseResult {
 			if (revokeAll !== undefined && typeof revokeAll !== "boolean") {
 				return bad("hello.revokeAll must be a boolean");
 			}
+			const capabilities = v["capabilities"];
+			if (
+				capabilities !== undefined &&
+				!(
+					Array.isArray(capabilities) &&
+					capabilities.length <= MAX_CAPABILITIES &&
+					capabilities.every((c) => typeof c === "string" && CAPABILITY.test(c))
+				)
+			) {
+				return bad(
+					`hello.capabilities must be a list of at most ${MAX_CAPABILITIES} names of 1-32 characters of a-z, 0-9, . and -`,
+				);
+			}
 			const hello: HelloMessage = {
 				type,
 				library: { name: library["name"], version: library["version"] },
@@ -377,7 +557,54 @@ export function parseTabMessage(text: string): ParseResult {
 			};
 			if (isAppName(app["name"])) hello.app.name = app["name"];
 			if (revokeAll === true) hello.revokeAll = true;
+			if (capabilities !== undefined) {
+				hello.capabilities = [...(capabilities as string[])];
+			}
 			return { ok: true, message: hello };
+		}
+		case "signin.start": {
+			const provider = v["provider"];
+			if (!isString(provider, 32) || provider === "") {
+				return bad("signin.start.provider missing");
+			}
+			const redirectUrl = v["redirectUrl"];
+			if (!isString(redirectUrl, 256) || redirectUrl === "") {
+				return bad("signin.start.redirectUrl missing");
+			}
+			const label = v["label"];
+			if (label !== undefined && !isLabel(label)) {
+				return bad(`signin.start.label must be 1-${MAX_LABEL} characters`);
+			}
+			return {
+				ok: true,
+				message:
+					label === undefined
+						? { type, provider, redirectUrl }
+						: { type, provider, redirectUrl, label },
+			};
+		}
+		case "signin.complete": {
+			const code = v["code"];
+			if (!isString(code, MAX_ID) || code === "") {
+				return bad("signin.complete.code missing");
+			}
+			return { ok: true, message: { type, code } };
+		}
+		case "signin.out":
+			return { ok: true, message: { type } };
+		case "member.rename": {
+			const member = v["member"];
+			const label = v["label"];
+			if (!isId(member)) return bad("member.rename.member missing");
+			if (!isLabel(label)) {
+				return bad(`member.rename.label must be 1-${MAX_LABEL} characters`);
+			}
+			return { ok: true, message: { type, member, label } };
+		}
+		case "member.remove": {
+			const member = v["member"];
+			if (!isId(member)) return bad("member.remove.member missing");
+			return { ok: true, message: { type, member } };
 		}
 		case "pong": {
 			const t = v["t"];

@@ -5968,3 +5968,121 @@ another tab; for 750 ms the switches were flat and grey (DEC-160), which reads a
 - A later change of the same tab's tools (`toolchange`, a navigation, a reload) waits in
   the disabled look as before (DEC-160: flat, no opacity), so a click that did nothing
   there is explained.
+
+## DEC-231: a browser's sign-in and its group at the relay
+
+2026-11-26, iteration 53, second pull request (the relay; DEC-229 decided the feature).
+What the plan left open or did not say, decided here; the conservative choice where the
+owner had not decided, marked (open) where the owner may want otherwise.
+
+- **Settings.** `TAB_MCP_SIGN_IN_APPS` (app ids, for the extension
+  `tab-mcp-extension,tab-mcp-extension-firefox`) and, per provider,
+  `TAB_MCP_SIGN_IN_{GOOGLE,MICROSOFT,GITHUB}_CLIENT_ID` and `_CLIENT_SECRET`, both or
+  neither. Apps without a provider, providers without an app, a client id without its
+  secret, all stop the relay at start (as every wrong setting does). Per app, not per
+  site: Firefox's extension origins cannot be listed (DEC-189). Identity binding's
+  `TAB_MCP_OIDC_*` stay as they are; the hosted relay sets Google's client in both.
+- **Who may sign in.** A session of a listed app, whose `hello` names `signin.v1` in the
+  new `capabilities` list, from an extension origin: the redirect URL must be the
+  extension's own (`https://<id>.chromiumapp.org/` with the origin's id; for Firefox any
+  `https://<40 hex>.extensions.allizom.org/`, root only). Every other session gets
+  today's protocol byte for byte, and the relay does not read its binding (owner,
+  2026-11-26: older extensions must work as today). A capability name is versioned
+  (`signin.v1`); an incompatible change gets a new name.
+- **The flow.** `signin.start` → `signin.url`: the relay's own single-use URL
+  (`/signin?flow=`, 10 minutes), which sets a cookie of its own per flow and redirects
+  to the provider; the callback is `/authorize/callback`, a browser flow's `state`
+  starts with `browser.<provider>.` (identity binding's states have no dot; PR 3's AI
+  app sign-in will take another prefix). Callback: the cookie must match (else an error
+  page, not the redirect: the browser that comes back may be a victim's), the session
+  must still hold its address (else nothing is redeemed), then the code is redeemed and
+  the account checked, but nothing is bound and nothing goes to the session. The browser
+  goes to `redirectUrl?signin=<completion code>` (random, single use, 2 minutes, for
+  that flow and session) or `redirectUrl?signin_error=<reason>` (`provider_error`,
+  `unchecked`, `session_gone`).
+- **Bound only when the extension completes it** (coordinator for the owner,
+  2026-11-26; this replaces the open "confirmation page" item of the first version).
+  The extension sends `signin.complete {code}` over its WebSocket; the relay binds only
+  if the code belongs to a flow that same session started, is unused (any use spends
+  it) and in time, then sends `signin.done` (display name, and for Microsoft `kind`).
+  Else `signin.failed` `code_refused`. The redirect URL (`*.chromiumapp.org`,
+  `*.extensions.allizom.org`) is never loaded: only the `launchWebAuthFlow` the
+  extension started intercepts it. A user who finishes a stranger's link is left with
+  the code in their own address bar; the stranger's session never gets it, nothing is
+  bound, and the display name never leaves the relay. The cookie check stays as well.
+  The stranger gets nothing unless the user also hands over the code (the address
+  they land on); then the stranger's session completes it within the 2 minutes and
+  joins the group.
+- **A page where the networks differ** (review of PR 257, coordinator's decision). The
+  relay compares the network of the request that opens `/signin?flow=` with the
+  session's (`networkKey`, as the limits use: an IPv4 address, an IPv6 /56). The same:
+  straight to the provider. Different: a relay page (no script, the pages' CSP) that
+  names the browser's label and the app, says "Only continue if you started this
+  yourself in the tab-mcp panel of that browser." and warns never to paste or send the
+  address one lands on afterwards to anyone. Continue is `POST /signin` with the page's
+  single-use token, the flow's cookie and this origin (a link alone cannot pass it);
+  Cancel ends the flow and goes to `redirectUrl?signin_error=cancelled`. The callback's
+  network is logged too (`signin.checked` `network`); `signin.done` and `group` carry
+  nothing more. Remaining risk, plainly: a user who continues past the page and sends
+  the code lets the stranger in; on the same network (one office, one household) there
+  is no page.
+- **Providers.** Google and Microsoft share identity binding's ID token checks (`redeemIdToken`, factored out of
+  `oidc.ts`); `prompt=select_account` everywhere, so a browser can choose another
+  account. Google's issuer is accepted with or without `https://`, as Google documents.
+  GitHub supports PKCE S256 for OAuth Apps (its docs, read 2026-11-26), so the flow uses
+  it; `allow_signup=false`; the token is used for one `GET /user` and dropped (not
+  revoked at GitHub).
+- **The key.** SHA-256 over `tab-mcp sign-in`, the provider and the stable id, one per
+  line: Google `iss` (the configured issuer) and `sub`, Microsoft `tid` and `oid` (both
+  GUIDs; the issuer must be `…/{tid}/v2.0` with the token's `tid`), GitHub the numeric
+  `id`. Not keyed, accepted (owner, 2026-11-26): the relay has no secret of its own, and
+  no new required secret is added for this. Consequence, in the threat model (A16):
+  whoever has a copy of the store can check it against GitHub's public user ids and so
+  learn which public GitHub accounts signed in (not which browser: the address id is a
+  hash too); Google's and Microsoft's ids are not public. An optional key setting can
+  come later; changing the hash then ends every binding, which no backwards
+  compatibility needs to save.
+- **The group.** Every live binding with the same key; at most 16 (the plan's proposal,
+  adopted), checked atomically in the store's `putBinding`, the 17th refused with
+  `group_full`. Member ids are random (`m_…`), labels come from `signin.start` (default
+  "Browser"), cleaned like AI app names. Any member renames or removes any member
+  (`member.rename`, `member.remove`); removing oneself is signing out. A browser that
+  signs in again with the same account keeps its member id and label and gets 90 days
+  from then; with another account it moves to that group. The group's state (`group`:
+  members with label, online, sign-in time; `self`; `expiresAt`; `maxMembers`) goes to
+  every online member on every change, a member's connect and disconnect included. No
+  mode, pin or tabs yet (PR 3 adds fields; tabs ignore unknown ones).
+- **Lifetime.** 90 days from the sign-in, the plan's proposal adopted, for DEC-062's
+  reason: it bounds a lost or forgotten browser to a quarter. Not a setting (a test hook
+  shortens it). The relay's sweep tells an online member whose 90 days are over
+  (`signin.ended` `expired`) and drops its binding. A signed-in session counts as used: it is not closed as unpaired after 10
+  minutes (DEC-097), since its group needs it online.
+- **The display name** is sent once, in `signin.done`, and neither stored nor logged; on
+  a reconnect the extension shows what it kept. No e-mail address is ever stored.
+- **Microsoft's kind** (owner's setup, plan commit d3668b1): one address can name a
+  personal account (an alias on outlook.com) and a work account of an Entra tenant with
+  that domain: two accounts (`tid`+`oid`), two groups, the same `preferred_username`.
+  `signin.done` carries `kind`: `personal` when the token's `tid` is the consumer tenant
+  `9188040d-6c67-4c5b-b112-36a304b66dad`, else `work` (work or school). Only there, like
+  the name: the store keeps no kind, and the group state has none (the extension keeps
+  it with the name).
+- **Limits** (A8's style): starts per session 5, then one per 30 s; per network 20,
+  then one per 30 s; one open flow per session (a new start replaces it), at most 3 not
+  yet opened per network, and a flow nobody opened ends with its session (review of PR
+  257: filling the 10 000 in all takes opening each link), 10 000 in all;
+  views of the sign-in URL and its callback per network 60, then one a second (two per
+  sign-in); 16 members; the session's control budget as for every message.
+- **Store.** Optional binding methods on `TokenStore` (all five or none, conformance
+  tests); a relay with sign-in refuses to start with a store without them rather than
+  keeping bindings in memory. SQLite schema 7 adds a `bindings` table; `min_reader_version`
+  stays 6, since an older relay leaves the table alone. The step to 4 (cutting used
+  refresh tokens) now runs only for files before 4, so this step touches no token row.
+- **Store failures.** A binding that cannot be read at `hello` leaves the session signed
+  out until it connects again (logged); one that cannot be written fails the sign-in
+  (`store_unavailable`); a sign-out, rename or removal that cannot be written is refused
+  with `store_unavailable` and changes nothing.
+- **Rename and remove check the store** (review of PR 257): each first reads the
+  sender's own binding, which must still be the member the session holds (else the
+  session is told `signin.ended` `removed` and the message gets `unknown_id`); and a
+  session's binding is read again once it is connected, so a browser removed while its
+  `hello` was answered is told so and is not counted online.

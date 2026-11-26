@@ -267,6 +267,8 @@ settings to `createRelay({ … , store })`.
 | `TAB_MCP_OIDC_ISSUER` / `TAB_MCP_OIDC_CLIENT_ID` / `TAB_MCP_OIDC_CLIENT_SECRET` | none | the relay as a client of the OpenID Connect provider (secret optional) |
 | `TAB_MCP_OIDC_SUBJECT_CLAIM` | `sub` | `sub` or `oid`, the claim compared |
 | `TAB_MCP_TAB_ASSERTION_ISSUER` / `TAB_MCP_TAB_ASSERTION_JWKS_URL` | none | the web app backend that signs tab assertions (DEC-076) |
+| `TAB_MCP_SIGN_IN_APPS` | empty | app ids whose sessions may sign in a browser (DEC-231) |
+| `TAB_MCP_SIGN_IN_{GOOGLE,MICROSOFT,GITHUB}_CLIENT_ID` / `_CLIENT_SECRET` | none | the relay as a client of each sign-in provider, both or neither (DEC-231) |
 
 # Citations
 

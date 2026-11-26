@@ -33,6 +33,27 @@ export interface OidcConfig {
 	assertionJwksUrl: string;
 }
 
+/** The providers a browser can sign in with (DEC-231). */
+export const SIGN_IN_PROVIDERS = ["google", "microsoft", "github"] as const;
+export type SignInProviderId = (typeof SIGN_IN_PROVIDERS)[number];
+
+/** The relay's client at one sign-in provider (DEC-231). */
+export interface SignInClient {
+	clientId: string;
+	/** Never logged; from the platform's secret store. */
+	clientSecret: string;
+}
+
+/**
+ * Browser sign-in (DEC-231): which apps' pages may sign in (the tab-mcp
+ * browser extension's), and the relay's client at each provider offered.
+ */
+export interface SignInConfig {
+	/** App ids whose sessions may sign in, e.g. `tab-mcp-extension`. */
+	apps: string[];
+	providers: Partial<Record<SignInProviderId, SignInClient>>;
+}
+
 /** The limits a site may set for its own tab sessions (DEC-045). */
 export interface SiteLimits {
 	maxMessageBytes: number;
@@ -120,6 +141,8 @@ export interface RelayConfig {
 	identity: PairingKind;
 	/** The provider and assertion signer; required when a site uses `oidc`. */
 	oidc?: OidcConfig;
+	/** Browser sign-in (DEC-231); absent: no session can sign in. */
+	signIn?: SignInConfig;
 	/** Hosts whose Client ID Metadata Documents are accepted; empty = any. */
 	clientIdHosts: string[];
 	trustProxy: TrustProxy;
@@ -257,7 +280,20 @@ const KNOWN_ENV: ReadonlySet<string> = new Set([
 	"TAB_MCP_OIDC_SUBJECT_CLAIM",
 	"TAB_MCP_TAB_ASSERTION_ISSUER",
 	"TAB_MCP_TAB_ASSERTION_JWKS_URL",
+	"TAB_MCP_SIGN_IN_APPS",
+	...SIGN_IN_PROVIDERS.flatMap((p) => [
+		signInEnvName(p, "CLIENT_ID"),
+		signInEnvName(p, "CLIENT_SECRET"),
+	]),
 ]);
+
+/** `TAB_MCP_SIGN_IN_GOOGLE_CLIENT_ID` and the like (DEC-231). */
+export function signInEnvName(
+	provider: SignInProviderId,
+	part: "CLIENT_ID" | "CLIENT_SECRET",
+): string {
+	return `TAB_MCP_SIGN_IN_${provider.toUpperCase()}_${part}`;
+}
 
 /**
  * `TAB_MCP_*` variables the relay does not know: a misspelled or removed
@@ -473,6 +509,7 @@ export function resolveConfig(input: Partial<RelayConfig> = {}): RelayConfig {
 		seen.add(site.origin);
 	}
 	validateIdentity(config);
+	validateSignIn(config);
 	config.clientIdHosts = config.clientIdHosts.map((h) => {
 		const host = h.trim().toLowerCase();
 		if (!/^[a-z0-9.-]+(:\d+)?$/.test(host)) {
@@ -708,6 +745,77 @@ function validateIdentity(config: RelayConfig): void {
 		);
 	}
 	config.oidc = { ...oidc, subjectClaim: claim };
+}
+
+/**
+ * Browser sign-in (DEC-231): a list of app ids and, for each provider
+ * offered, a client id and its secret. Apps without a provider, providers
+ * without an app and a provider with only one of the two stop the relay.
+ */
+function validateSignIn(config: RelayConfig): void {
+	const signIn = config.signIn as unknown;
+	if (signIn === undefined) return;
+	if (typeof signIn !== "object" || signIn === null) {
+		throw new ConfigError("signIn must be an object", "signIn");
+	}
+	const { apps, providers: given = {} } = signIn as Partial<SignInConfig>;
+	if (!Array.isArray(apps) || !apps.every(isAppId)) {
+		throw new ConfigError(
+			`TAB_MCP_SIGN_IN_APPS must be app ids (1-${MAX_APP_ID} characters of a-z, 0-9 and -)`,
+			"signIn",
+		);
+	}
+	if (typeof given !== "object" || given === null) {
+		throw new ConfigError("signIn.providers must be an object", "signIn");
+	}
+	const providers: Partial<Record<SignInProviderId, SignInClient>> = {};
+	for (const [id, client] of Object.entries(given)) {
+		if (!(SIGN_IN_PROVIDERS as readonly string[]).includes(id)) {
+			throw new ConfigError(
+				`unknown sign-in provider ${id} (one of ${SIGN_IN_PROVIDERS.join(", ")})`,
+				"signIn",
+			);
+		}
+		if (client === undefined) continue;
+		const provider = id as SignInProviderId;
+		const c = client as Partial<SignInClient> | null;
+		if (typeof c?.clientId !== "string" || c.clientId.trim() === "") {
+			throw new ConfigError(
+				`${signInEnvName(provider, "CLIENT_ID")} is required with ${signInEnvName(provider, "CLIENT_SECRET")}`,
+				"signIn",
+			);
+		}
+		if (typeof c.clientSecret !== "string" || c.clientSecret === "") {
+			throw new ConfigError(
+				`${signInEnvName(provider, "CLIENT_SECRET")} is required with ${signInEnvName(provider, "CLIENT_ID")}`,
+				"signIn",
+			);
+		}
+		providers[provider] = {
+			clientId: c.clientId.trim(),
+			clientSecret: c.clientSecret,
+		};
+	}
+	const unique = [...new Set(apps)];
+	const offered = Object.keys(providers).length > 0;
+	if (unique.length > 0 && !offered) {
+		throw new ConfigError(
+			"TAB_MCP_SIGN_IN_APPS needs a sign-in provider (TAB_MCP_SIGN_IN_GOOGLE_CLIENT_ID and TAB_MCP_SIGN_IN_GOOGLE_CLIENT_SECRET, or the same for MICROSOFT or GITHUB)",
+			"signIn",
+		);
+	}
+	if (unique.length === 0 && offered) {
+		throw new ConfigError(
+			"sign-in providers are set, but TAB_MCP_SIGN_IN_APPS names no app that may sign in",
+			"signIn",
+		);
+	}
+	config.signIn = { apps: unique, providers };
+}
+
+/** Whether the sessions of `app` may sign in (DEC-231). */
+export function signInAllowed(config: RelayConfig, app: string): boolean {
+	return config.signIn?.apps.includes(app) === true;
 }
 
 /** The instance-wide limits, the defaults of every site. */
@@ -974,6 +1082,24 @@ export function configFromEnv(env: Env): Partial<RelayConfig> {
 			oidc.subjectClaim = oidcVars.subjectClaim as SubjectClaim;
 		}
 		out.oidc = oidc;
+	}
+	const signInApps = env["TAB_MCP_SIGN_IN_APPS"] ?? "";
+	const providers: Partial<Record<SignInProviderId, SignInClient>> = {};
+	for (const p of SIGN_IN_PROVIDERS) {
+		const clientId = env[signInEnvName(p, "CLIENT_ID")] ?? "";
+		const clientSecret = env[signInEnvName(p, "CLIENT_SECRET")] ?? "";
+		if (clientId !== "" || clientSecret !== "") {
+			providers[p] = { clientId, clientSecret };
+		}
+	}
+	if (signInApps.trim() !== "" || Object.keys(providers).length > 0) {
+		out.signIn = {
+			apps: signInApps
+				.split(",")
+				.map((s) => s.trim())
+				.filter((s) => s !== ""),
+			providers,
+		};
 	}
 	set(
 		"trustProxy",

@@ -69,6 +69,17 @@ Identity binding (pairing by the same sign-in instead of a code; docs/configurat
   TAB_MCP_TAB_ASSERTION_ISSUER    iss of the web app's tab assertions (required for oidc)
   TAB_MCP_TAB_ASSERTION_JWKS_URL  JWKS of the web app's assertion keys (required for oidc)
 
+Browser sign-in (the tab-mcp browser extension signs in; docs/configuration.md):
+  TAB_MCP_SIGN_IN_APPS        comma-separated app ids that may sign in, e.g.
+                              tab-mcp-extension,tab-mcp-extension-firefox
+  TAB_MCP_SIGN_IN_GOOGLE_CLIENT_ID      the relay's client at Google, and
+  TAB_MCP_SIGN_IN_GOOGLE_CLIENT_SECRET  its secret (both or neither)
+  TAB_MCP_SIGN_IN_MICROSOFT_CLIENT_ID   the same at Microsoft (multi-tenant,
+  TAB_MCP_SIGN_IN_MICROSOFT_CLIENT_SECRET  personal and work accounts)
+  TAB_MCP_SIGN_IN_GITHUB_CLIENT_ID      the same at GitHub (an OAuth App
+  TAB_MCP_SIGN_IN_GITHUB_CLIENT_SECRET  without scopes)
+                              Each registers <public URL>/authorize/callback.
+
 Stops on SIGTERM or SIGINT: tabs get "bye" and close code 4004.
 `;
 
