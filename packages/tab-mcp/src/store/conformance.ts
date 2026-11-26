@@ -151,15 +151,56 @@ export function tokenStoreConformance(
 			};
 		};
 
-		test("bindings, if implemented: all five methods or none (DEC-231)", () => {
+		test("bindings, if implemented: all seven methods or none (DEC-231, DEC-232)", () => {
 			const methods = [
 				store.putBinding,
 				store.getBinding,
 				store.listBindings,
 				store.renameBinding,
 				store.deleteBinding,
+				store.getGroupMode,
+				store.setGroupMode,
 			].filter((m) => m !== undefined);
-			expect([0, 5]).toContain(methods.length);
+			expect([0, 7]).toContain(methods.length);
+		});
+
+		test("the group of a group grant round-trips, and its grants list under the group's address (DEC-232)", async () => {
+			const grant = record({
+				grantId: "g_group",
+				addressId: "group:group-a",
+				group: "group-a",
+				kind: "refresh",
+			});
+			const page = record({ grantId: "g_page" });
+			await store.put(grant);
+			await store.put(page);
+			expect(await store.get(grant.hash)).toEqual(grant);
+			const got = await store.get(page.hash);
+			expect(got !== undefined && "group" in got).toBe(false);
+			expect(await store.markUsed(grant.hash, now, now + 1000)).toBe(true);
+			expect((await store.get(grant.hash))?.group).toBe("group-a");
+			await store.put({ ...grant, hash: `${grant.hash}-a`, kind: "access" });
+			expect(
+				(await store.listGrants("group:group-a", now)).map((g) => g.grantId),
+			).toEqual(["g_group"]);
+			expect(
+				(await store.listGrants("addr-a", now)).map((g) => g.grantId),
+			).toEqual(["g_page"]);
+		});
+
+		test("bindings, if implemented: a group's mode is set, replaced, and goes with the group's last binding (DEC-232)", async () => {
+			if (!hasBindings(store)) return;
+			expect(await store.getGroupMode("group-a")).toBeUndefined();
+			const r = binding({ expiresAt: now + 10 });
+			await store.putBinding(r, 16, now);
+			await store.setGroupMode("group-a", "pinned");
+			await store.setGroupMode("group-b", "pinned");
+			expect(await store.getGroupMode("group-a")).toBe("pinned");
+			await store.setGroupMode("group-a", "front");
+			expect(await store.getGroupMode("group-a")).toBe("front");
+			await store.deleteExpired(now + 10);
+			expect(await store.getGroupMode("group-a")).toBeUndefined();
+			expect(await store.getGroupMode("group-b")).toBeUndefined();
 		});
 
 		test("bindings, if implemented: put, get, list oldest first, replace by address", async () => {

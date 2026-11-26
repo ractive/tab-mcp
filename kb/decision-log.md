@@ -6086,3 +6086,100 @@ owner had not decided, marked (open) where the owner may want otherwise.
   session is told `signin.ended` `removed` and the message gets `unknown_id`); and a
   session's binding is read again once it is connected, so a browser removed while its
   `hello` was answered is told so and is not counted online.
+
+## DEC-232: AI apps connected to a group, and where their calls go
+
+2026-11-26, iteration 53, third pull request (the relay; DEC-229 decided the feature,
+DEC-230 the extension's tab ids, DEC-231 the groups). What the plan left open or did not
+say, decided here; the conservative choice where the owner had not decided, marked
+(open) where the owner may want otherwise.
+
+- **Pairing by sign-in.** The pairing page of an app in `TAB_MCP_SIGN_IN_APPS` (the
+  plan's proposal: only the extension's app ids) offers one "Sign in with …" button per
+  provider beside the code field; providers whose discovery fails are left out of the
+  page. The flow's `state` starts with `account.<provider>.`; it shares the callback,
+  the visit cookie, the CSRF token and the guess limit (charged, given back when it
+  pairs) with identity binding's sign-in. It pairs when the group has at least one live
+  binding, online or not (proposed in the brief, adopted): the page says so beside the
+  buttons ("also those that are not open now"); without one it says how to sign in a
+  browser first (403). A code still pairs with one browser.
+- **The grant.** The token record gets `group` (the binding's group key) and the address
+  id `group:<key>`, which no page can have (base32 has no colon). So `listGrants`,
+  `revoke`, tombstones, reuse detection and `/revoke` need nothing new, and a store that
+  drops `group` fails closed (no page at that address). SQLite schema 8: `tokens.group_key`
+  and a `groups` table. `min_reader_version` stays 6 (coordinator for the owner,
+  2026-11-26, review of PR 258; the first version raised it to 8): an older relay reading
+  a group token sees the address id `group:<key>`, which no page has, and answers "not
+  open"; a group grant it refreshes loses its group and then reaches no browser, also
+  after the upgrade again. So a rollback works without the backup; group grants just stop
+  until their AI apps sign in again.
+- **Only the extension's own tools' `tab`** (review of PR 258). The relay reads and
+  rewrites the `tab` argument only of `page_info`, `webmcp_tools`, `webmcp_call`,
+  `navigate`, `go_back`, `go_forward`, `reload` and `use_tab`; any other tool's arguments,
+  a `page_<name>` tool's (the web page's own schema) above all, pass unread and the call
+  goes by the pin and focus rules.
+- **Text, not a parsed copy** (review of PR 258). The `tab` value is spliced into the
+  request text where it stands; the answered-by item and the `_meta` key are inserted
+  into the response text before the closing brackets. No body passes through
+  JSON.parse and JSON.stringify, which would round integers above 2^53 and turn 1e400
+  into null. A body of an unexpected shape passes unchanged.
+- **A grant listing that fails** (review of PR 258) does not hold back the `group`
+  message: it goes with the grants of the last announcement, or none; only a failed
+  `listBindings` suppresses it.
+- **Microsoft's admin approval** (coordinator, for the extension's PR 4). A Microsoft
+  refusal whose `error_description` (on the callback or from the token endpoint) or
+  `error_codes` names AADSTS65001, AADSTS90094 or AADSTS90095 is a reason of its own:
+  a browser's sign-in redirects with `signin_error=admin_approval` (else
+  `provider_error` or `unchecked`, as before), and the pairing page says "This
+  account's organisation requires an administrator to approve tab-mcp relay first."
+  (403). Only the codes are read; the provider's text is never sent on or logged.
+- **Where a call goes.** `tab` `<member>:<tab>` first (the member taken off, also in an
+  `mcp-param-tab` header); else the pin's member; else the member whose window had the
+  focus last, else the one that came online last, and the result says so. Mode pinned
+  without a pin routes like front; that member pins its own front tab and reports it
+  with `group.pin`. Tool name, `tab` and the result are all the relay reads.
+- **Who holds the pin** (the brief's preference). The relay tells the members the pin in
+  `group` (`pin: {member, tab}`) and does not add `tab` to calls: the pinned member sends
+  calls without `tab`, `page_<name>` tools included, to its pinned tab, and answers a
+  closed pinned tab itself.
+- **`use_tab`** with `<member>:<tab>` pins for the group only once the member's result is
+  no error (the extension pins only a tab it may read), and switches the group to
+  pinned, also from front, as the plan says.
+- **Mode in the store, pin in memory.** The brief: "in memory is fine for the pin". The
+  mode is a member's deliberate setting, and a restart must not change where calls go,
+  so it is kept: two more optional store methods, `getGroupMode`/`setGroupMode`, part of
+  the binding set (all seven or none), conformance-tested. After a restart a pinned
+  group has no pin, and the next call pins the front tab of the browser used last.
+- **No silent fallback.** A `tab` or pin naming an offline member fails with the reason
+  and the `list_tabs` hint after the usual wait for that member (`TAB_MCP_PAGE_WAIT_S`);
+  a pin to a member removed from the group fails too (the pin is kept, not dropped:
+  dropping it would move calls without anyone choosing it). Only front mode falls back.
+- **Who answered.** A last text in a tool result's `content`, "Answered by the browser
+  “<label>” (its tabs are <member>:<id> in list_tabs).", plus `_meta
+  ["ch.ractive.tab-mcp/answeredBy"]` on every result (`tools/list` and `server/discover`
+  get only `_meta`: they have no content the model reads). `structuredContent` stays the
+  member's, so an output schema holds. JSON-RPC errors pass unchanged. In a stream only
+  the response's event is rewritten.
+- **`list_tabs`.** Fanned out to every online member with the AI app's grant, 15 s each
+  (below the keep-alive interval), joined as `{mode, tabs, browsers, more?, note}` with
+  every member listed (offline, busy, no answer: `error`); the members' own `pinned`
+  flags are replaced by the relay's pin, their `inFront` kept per browser; 100 tabs per
+  member, 256 KiB of tabs in all. Fan-out is bounded by the group's 16 members.
+- **`focus`.** No fields, only from a signed-in member, ignored in pinned mode; stamped
+  with a strictly increasing relay clock. Not counted against the control budget (a
+  user switching windows fast must not get 4008): a budget of its own, 20, then two a
+  second, dropped past it. `group.focus` names the member calls go to now, the fallback
+  included, and is announced when it changes.
+- **The group's grants** ride in `group.grants` (as `session.grants`); there is no
+  `grant.added`/`grant.removed` for them. `group.grant.revoke` (a new message rather
+  than a second meaning for `grant.revoke`) revokes for the whole group and ends the
+  requests in flight on every member. Signing out or removing members leaves the group's
+  grants: the group lives while one browser is signed in.
+- **Protocol gating.** No new capability name: every new field and message is for
+  `signin.v1` sessions only, and the extension of this iteration may require this relay
+  (owner, 2026-11-26). Page grants, also of signed-in browsers, pass byte for byte.
+- **Known limits** (open). A listen stream stays on the member it was opened on; when
+  the target moves to another member the AI app's tool list is stale until it lists
+  again (no `notifications/tools/list_changed` from the relay). Labels come from the
+  last announcement; a member that just joined may be named "Browser" for one call.
+  At most 64 requests per group wait for a member.

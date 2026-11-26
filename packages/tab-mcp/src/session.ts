@@ -354,10 +354,13 @@ export class TabSession {
 		const parsed = parseTabMessage(data, { signIn: this.signInOffered });
 		// Every frame but the answers to pings and requests counts against the
 		// control budget; past it the session ends with 4008 (RS 3).
+		// `focus` has a budget of its own, which drops instead of ending the
+		// session: switching windows quickly is no flood (DEC-232).
 		const exempt =
 			parsed.ok &&
 			!("unknown" in parsed) &&
-			UNMETERED_TYPES.has(parsed.message.type);
+			(UNMETERED_TYPES.has(parsed.message.type) ||
+				parsed.message.type === "focus");
 		if (!exempt && !this.#takeControl()) {
 			this.#host.logger.warn("tab.rate_limited", { session: this.sessionId });
 			this.#sendError("rate_limited", "too many messages");
@@ -510,6 +513,24 @@ export class TabSession {
 				);
 				return;
 			}
+			case "group.mode":
+			case "group.pin":
+			case "group.grant.revoke": {
+				// Parsed as such only while `signInOffered` (DEC-232).
+				const signIn = this.#host.signIn;
+				if (signIn === undefined) return;
+				await this.#serialSignIn(() =>
+					msg.type === "group.mode"
+						? signIn.setMode(this, msg.mode)
+						: msg.type === "group.pin"
+							? signIn.pinHere(this, msg.tab)
+							: signIn.revokeGroupGrant(this, msg.grantId),
+				);
+				return;
+			}
+			case "focus":
+				this.#host.signIn?.focus(this);
+				return;
 			case "grant.revoke":
 				try {
 					if (!(await this.#host.revokeGrant(this, msg.grantId))) {
@@ -930,7 +951,9 @@ export class TabSession {
 			code,
 			message,
 			for: about.type,
-			...(about.type === "grant.revoke" ? { grantId: about.grantId } : {}),
+			...(about.type === "grant.revoke" || about.type === "group.grant.revoke"
+				? { grantId: about.grantId }
+				: {}),
 			...(about.type === "member.rename" || about.type === "member.remove"
 				? { member: about.member }
 				: {}),

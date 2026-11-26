@@ -16,6 +16,8 @@ export async function issueAccessToken(
 		clientId: string;
 		clientName: string;
 		subject?: string;
+		/** A group grant's group (DEC-232); `addressId` is then `groupAddress(group)`. */
+		group?: string;
 	},
 	options: { ttlMs: number; now?: number },
 ): Promise<{ token: string; record: TokenRecord }> {
@@ -35,6 +37,7 @@ export async function issueAccessToken(
 		expiresAt: now + options.ttlMs,
 	};
 	if (grant.subject !== undefined) record.subject = grant.subject;
+	if (grant.group !== undefined) record.group = grant.group;
 	await store.put(record);
 	return { token, record };
 }

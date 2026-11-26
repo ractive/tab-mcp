@@ -65,6 +65,10 @@ export interface FakeProviders {
 	tamper: ((claims: Json) => Json) | undefined;
 	/** The provider sends the browser back with this `error` instead of a code. */
 	deny: string | undefined;
+	/** The `error_description` sent back with `deny`. */
+	denyDescription: string | undefined;
+	/** The token endpoints answer HTTP 400 with this body instead of tokens (Microsoft's form). */
+	tokenError: Record<string, unknown> | undefined;
 	/** GitHub answers the code exchange with this `error` (HTTP 200, as GitHub does). */
 	githubTokenError: string | undefined;
 	/** Requests to GitHub's user API (with the token each carried). */
@@ -109,6 +113,8 @@ export async function startFakeProviders(): Promise<FakeProviders> {
 		github: { id: 1001, login: "alice" },
 		tamper: undefined,
 		deny: undefined,
+		denyDescription: undefined,
+		tokenError: undefined,
 		githubTokenError: undefined,
 	};
 	const authorizeRequests: FakeProviders["authorizeRequests"] = [];
@@ -130,7 +136,13 @@ export async function startFakeProviders(): Promise<FakeProviders> {
 		const st = q.get("state") ?? "";
 		const params: Record<string, string> =
 			state.deny !== undefined
-				? { error: state.deny, state: st }
+				? {
+						error: state.deny,
+						state: st,
+						...(state.denyDescription === undefined
+							? {}
+							: { error_description: state.denyDescription }),
+					}
 				: (() => {
 						const code = crypto.randomUUID();
 						codes.set(code, {
@@ -186,6 +198,9 @@ export async function startFakeProviders(): Promise<FakeProviders> {
 		}
 		const form = new URLSearchParams(await req.text());
 		const issued = await redeem(provider, form, client.clientId);
+		if (state.tokenError !== undefined) {
+			return Response.json(state.tokenError, { status: 400 });
+		}
 		if (issued === undefined) {
 			return Response.json({ error: "invalid_grant" }, { status: 400 });
 		}

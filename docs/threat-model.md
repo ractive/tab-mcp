@@ -52,7 +52,7 @@ See the [protocol](protocol.md) for the details.
 | The AI app | the tools it may call and their results | following the user's intent (a model drives it) |
 | The model provider behind the AI app | the same as the AI app | nothing |
 | A WebMCP caller: an agent in the browser, another extension, an `exposedTo` origin (unless the page sets `webmcp: false`, A14) | the tools the page mirrors into WebMCP and their results | nothing |
-| Another browser signed in with the same account (A16) | the group's labels, member ids, sign-in times and who is online; nothing of the other browsers' tabs | nothing; it can rename or remove the others |
+| Another browser signed in with the same account (A16, A17) | the group's labels, member ids, sign-in times and who is online, the AI apps connected to the group, and every call of theirs that the relay sends to it, in clear text; nothing of the other browsers' tabs or of calls that go to them | nothing; it can rename or remove the others, revoke the group's AI apps, set the mode and the pin, claim the focus, and answer the calls it gets as it likes |
 | The network | nothing: TLS everywhere, `wss:` and `https:` only outside development | nothing |
 
 The relay cannot be made blind. The AI app speaks HTTPS to the relay, and the relay must
@@ -501,6 +501,10 @@ attacks.
   link), each 10 minutes; views of
   the sign-in URL and its callback per network, 60, then one a second; 16 members per
   group.
+- **Group grants** (A17): a group's `list_tabs` goes to at most its 16 members, each
+  with 15 seconds and its own request slots; the joined list holds at most 256 KiB of
+  tabs; 64 requests per group wait for a member; `focus` messages, 20 per session, then
+  two a second, past which they are dropped, never a reason to close the session.
 - **Control messages from a tab** (everything but `pong` and the `http.response*`
   answers) have a budget per session: 30, then 2 a second. Past it the relay sends
   `rate_limited` and closes with 4008. A second "revoke all" of a page within a
@@ -1103,15 +1107,15 @@ A browser extension can sign in at the relay with Google, Microsoft or GitHub
 (`TAB_MCP_SIGN_IN_APPS`, DEC-231). The relay binds the extension's address id to the
 account; every browser bound to one account is a member of that account's group, and the
 members see each other's labels and who is online, and can rename and remove each other
-([protocol](protocol.md#browser-sign-in)). Routing an AI app's calls to a group is not
-built yet; once it is, a group's members are what an AI app connected to the group
-reaches.
+([protocol](protocol.md#browser-sign-in)). A group's members are what an AI app connected
+to the group reaches (A17).
 
 - **An account taken over reaches the group.** Whoever can sign in to the account at the
   provider can sign a browser of their own into the group: it is then a member like the
   owner's. Every member sees it join (its label, online), and any member can remove it;
-  it can also remove the owner's browsers, which may sign in again. Once AI apps connect
-  to a group, such a member can receive their calls and answer them. The provider's own
+  it can also remove the owner's browsers, which may sign in again. It can receive the
+  calls of the AI apps connected to the group and answer them (A17), and see which AI
+  apps they are. The provider's own
   protection of the account (a second factor, Conditional Access for work accounts) is
   what stands in front of it.
 - **Someone else's sign-in link.** The relay's URL from `signin.url` works once, for
@@ -1189,6 +1193,62 @@ reaches.
 - **Older extensions are not affected.** A session that does not ask for sign-in in its
   `hello` gets no message of it and is answered as before; the relay does not read its
   binding.
+
+### A17: AI apps connected to a group
+
+An AI app can pair with a whole group: its user signs in on the pairing page with the
+account the browsers signed in with, and the grant is the group's (DEC-232). The relay
+then sends each of its calls to one member: the one a `tab` argument names, the pinned
+one, or the one whose window had the focus last, and `list_tabs` to every member online
+([protocol](protocol.md#group-grants)).
+
+- **Pairing by sign-in.** It pairs only an AI app whose user signed in with the same
+  account at the provider (the account's key, as for a browser's sign-in), and only
+  when that group exists. The pairing page's rules hold as for a code: the verified host
+  of the AI app in the heading, the page's form token and cookie, the callback only in
+  the browser that started it, and a sign-in counts as a guess against the network's
+  limit (given back when it pairs). Unlike a code, it needs no browser to be open, and
+  no browser is asked: whoever can sign in to the account (A16: a taken-over account)
+  can connect an AI app to the user's browsers. Every member sees the new grant in its
+  panel, and any member can revoke it.
+- **A member is a man in the middle of the group's calls, never a caller.** A member's
+  extension gets in clear text every call the relay sends it, with its arguments, and
+  answers it as it likes: a false answer, or none. It can steer calls to itself: set the
+  mode, pin a tab of its own (`group.pin`), or claim the focus in mode `front` (`focus`
+  is the member's own word; the relay only stamps it). It cannot make a call, read the
+  tokens, see another member's tabs, its address id or the calls sent to it, or learn
+  the AI app's arguments of a call that goes elsewhere. Every result names the member
+  that answered ("Answered by the browser “…”"), and every panel shows the mode, the pin
+  and the member calls go to, so the user and the model see a change. A member signed
+  in with a taken-over account, or a Firefox extension that is not the tab-mcp browser
+  extension (A16), is such a member.
+- **What the relay reads.** For a group grant the relay reads the JSON-RPC method, the
+  tool name, the `tab` argument of the extension's own tools that take one (never a
+  `page_<name>` tool's arguments, which are the web page's), and the result of the
+  response; it rewrites that `tab` value in the text and inserts a line naming the
+  member, every other byte as it came. A page grant's
+  requests and responses pass unchanged, byte for byte, as before.
+- **What the relay learns.** In mode "the tab in front" the relay learns when one of a
+  member's windows gains the focus (no address, no title, no tab) and stamps it with its
+  own clock; in mode "a pinned tab" members do not send it, and the relay ignores it.
+  The pin (a member and a tab id) is in memory only; the mode is in the token store.
+  `list_tabs` brings the titles and addresses of the tabs the extensions may read
+  through the relay, as any tool result does (the relay operator sees every result,
+  "Who sees what").
+- **No silent fallback.** A call whose `tab` or pin names a member that is offline, or
+  no longer in the group, fails with that reason and asks the AI app to call `list_tabs`;
+  it never lands in another browser. Only mode "the tab in front" falls back to the
+  member that came online last when the one used last is offline, and the result says
+  so.
+- **Revocation.** Any member revokes any of the group's grants; it ends for the whole
+  group at once, its calls in flight on every member included (`-31009`). Removing or
+  signing out a member does not revoke the group's grants: the group stays while one
+  browser is signed in, and a group without online members answers "no browser is
+  online".
+- **Limits.** `list_tabs` asks at most the group's 16 members, each within 15 seconds
+  and its own slots for requests; the joined list holds 256 KiB of tabs; 64 requests per
+  group wait for a member; `focus` has a budget of its own (20, then two a second per
+  session) and is dropped past it, so switching windows quickly never closes a session.
 
 ## Safe defaults
 
@@ -1276,6 +1336,11 @@ each default.
   2 minutes; the relay's page warns where the link was opened from another network,
   not from the same one. A copy of the store tells which public GitHub accounts signed
   in (A16).
+- With group grants: whoever can sign in to the account connects an AI app to every
+  browser of the group without any browser being asked, and every member receives the
+  calls sent to it in clear text and can answer them falsely, steer calls to itself (the
+  pin, the focus) or revoke the group's AI apps; the result names the member and every
+  panel shows the target, nothing more (A17).
 - With the tab-mcp browser extension: a tool that runs without asking (marked read-only by the page,
   or with its "Always allow" switch on for its site) does whatever the AI app asks of it, and another program on
   the computer can click a notification or the side panel (A13).

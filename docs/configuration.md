@@ -325,6 +325,16 @@ TAB_MCP_SIGN_IN_GITHUB_CLIENT_SECRET=…
   relay refuses to start). Not the e-mail address or the user name: the extension is
   told them once and keeps them itself. A sign-in lasts 90 days, then the browser signs
   in again. A group has at most 16 browsers.
+- **AI apps connected to the group** (DEC-232). The pairing page of these apps also
+  offers "Sign in with …" for the same providers beside the code field: an AI app whose
+  user signs in there is connected to every browser signed in with that account (a group
+  grant), and the relay sends each of its calls to one of them: the tab the AI app
+  names, the pinned tab, or the tab in front of the browser used last
+  ([protocol](protocol.md#group-grants)). It needs nothing more to configure. The
+  group's mode (the tab in front, or a pinned tab) is kept in the token store (the SQLite
+  store's `groups` table and the tokens' `group_key`, schema 8; an older relay still
+  opens the file, and the group grants then stop until their AI apps sign in again);
+  the pin is kept in memory and is lost when the relay restarts.
 
 ## Open relay
 

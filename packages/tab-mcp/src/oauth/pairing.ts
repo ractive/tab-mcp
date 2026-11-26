@@ -44,9 +44,11 @@ export interface PairingContext {
 export type PairingResult =
 	/**
 	 * Paired with the page of `addressId`; `subject` is recorded on the grant
-	 * (identity binding, DEC-077).
+	 * (identity binding, DEC-077). With `group`, paired with a group of
+	 * signed-in browsers (DEC-232): `addressId` is then the group's own
+	 * (`groupAddress`).
 	 */
-	| { ok: true; addressId: string; subject?: string }
+	| { ok: true; addressId: string; subject?: string; group?: string }
 	/** Continue elsewhere (the provider's sign-in); the answer comes to `callback`. */
 	| { ok: "redirect"; location: string }
 	| {

@@ -70,10 +70,36 @@ interface Flow {
 export class OidcError extends Error {
 	override name = "OidcError";
 	readonly reason: string;
-	constructor(reason: string, message: string) {
+	/** The provider refused because an administrator must approve the app first. */
+	readonly adminApproval: boolean;
+	constructor(reason: string, message: string, adminApproval = false) {
 		super(message);
 		this.reason = reason;
+		this.adminApproval = adminApproval;
 	}
+}
+
+/**
+ * Microsoft's errors for an app that the account's organisation must
+ * approve first (DEC-232): AADSTS65001 (consent required), AADSTS90094 and
+ * AADSTS90095 (an administrator's approval, the approval workflow).
+ */
+const ADMIN_APPROVAL_CODES: readonly number[] = [65001, 90094, 90095];
+const ADMIN_APPROVAL_TEXT = /\bAADSTS(?:65001|90094|90095)\b/;
+
+/**
+ * Whether a provider's error says an administrator must approve the app:
+ * one of those codes in its description or in its `error_codes`. Only this
+ * is read from the description; it is never passed on.
+ */
+export function needsAdminApproval(
+	description: string | null | undefined,
+	codes: readonly number[] = [],
+): boolean {
+	return (
+		ADMIN_APPROVAL_TEXT.test(description ?? "") ||
+		codes.some((c) => ADMIN_APPROVAL_CODES.includes(c))
+	);
 }
 
 function str(v: unknown): string | undefined {
@@ -267,7 +293,11 @@ export async function redeemIdToken(
 		);
 	} catch (e) {
 		if (e instanceof HttpJsonError) {
-			throw new OidcError(`token_${e.error || e.status}`, e.message);
+			throw new OidcError(
+				`token_${e.error || e.status}`,
+				e.message,
+				needsAdminApproval(e.description, e.codes),
+			);
 		}
 		throw e;
 	}

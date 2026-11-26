@@ -31,6 +31,8 @@ import { JWT_ALGORITHMS, JwtError } from "../jwt.ts";
 import { errorFields, type Logger, truncateKey } from "../log.ts";
 import type { GrantInfo } from "../protocol.ts";
 import { RateLimiter } from "../ratelimit.ts";
+import { AccountPairing } from "../signin/accounts.ts";
+import type { SignInProvider } from "../signin/providers.ts";
 import { StoreFailure } from "../store/guard.ts";
 import { NonceSet } from "../store/memory.ts";
 import type { TokenRecord, TokenStore } from "../store/types.ts";
@@ -113,6 +115,8 @@ export interface AuthorizationHost {
 	/** Tell the address's tab, if connected. */
 	grantAdded(addressId: string, grant: GrantInfo): void;
 	grantRemoved(addressId: string, grantId: string, reason: string): void;
+	/** An AI app's sign-in that pairs it with a group of browsers (DEC-232), when offered. */
+	readonly accounts?: AccountPairing;
 }
 
 /** Test-only settings; never reachable from configuration. */
@@ -158,6 +162,8 @@ interface Pending extends AuthorizationRequest {
 	kinds: PairingKind[];
 	/** The guess limit's key a sign-in under way was charged to. */
 	charged?: string;
+	/** The providers of an AI app's sign-in the page offers (DEC-232). */
+	accounts: SignInProvider[];
 }
 
 interface IssuedCode extends AuthorizationRequest {
@@ -173,6 +179,8 @@ interface IssuedCode extends AuthorizationRequest {
 	grantId?: string;
 	/** The binding key the grant is made for (identity binding, DEC-077). */
 	subject?: string;
+	/** The group the grant is made for (DEC-232); `addressId` is its own then. */
+	group?: string;
 }
 
 /** The client of a token or revocation request (DEC-106). */
@@ -750,6 +758,12 @@ export class AuthorizationServer {
 					)
 				: fail("invalid_target", "this relay has no pages of that app");
 		}
+		// An AI app's sign-in beside the code (DEC-232): the providers whose
+		// sign-in page is known now.
+		const accounts =
+			this.#host.accounts?.offers(app) === true
+				? await this.#host.accounts.prepare()
+				: [];
 		this.#sweepPending();
 		// Counted per /56 for IPv6, as tab sessions are (RS 1).
 		const network = networkKey(ip);
@@ -766,6 +780,7 @@ export class AuthorizationServer {
 			expiresAt: Date.now() + PENDING_TTL_MS,
 			ip: network,
 			kinds,
+			accounts,
 			client,
 			redirectUri,
 			state,
@@ -813,6 +828,7 @@ export class AuthorizationServer {
 		};
 		dec(this.#pendingPerIp, p.ip);
 		for (const method of Object.values(this.#methods)) method?.forget?.(p.id);
+		this.#host.accounts?.forget(p.id);
 	}
 
 	/** POST `/authorize`: the pairing form (connect, cancel, try again). */
@@ -886,7 +902,15 @@ export class AuthorizationServer {
 			);
 		}
 		// `connect` is the first method the page offers (the code, where the
-		// app has it); `signin` is the sign-in beside a code field.
+		// app has it); `signin` is the sign-in beside a code field;
+		// `account.<provider>` an AI app's sign-in with a group (DEC-232).
+		const accounts = this.#host.accounts;
+		const account =
+			AccountPairing.isAction(action) &&
+			accounts !== undefined &&
+			pending.accounts.length > 0
+				? accounts
+				: undefined;
 		const kind =
 			action === "connect"
 				? pending.kinds[0]
@@ -894,7 +918,7 @@ export class AuthorizationServer {
 					? "oidc"
 					: undefined;
 		const method = kind === undefined ? undefined : this.#methods[kind];
-		if (method === undefined) {
+		if (method === undefined && account === undefined) {
 			return this.#pairingPage(pending, browser.id);
 		}
 		// Only a real guess is charged: the method calls this right before it
@@ -908,12 +932,18 @@ export class AuthorizationServer {
 			charged = true;
 			return true;
 		};
-		const result = await method.check(
-			this.#host.pool(pending.app),
-			form,
-			admit,
-			{ requestId: pending.id, browserId: browser.id },
-		);
+		const context = { requestId: pending.id, browserId: browser.id };
+		const result =
+			account !== undefined
+				? await account.check(form, admit, context)
+				: await (method as PairingMethod).check(
+						this.#host.pool(pending.app),
+						form,
+						admit,
+						context,
+					);
+		const methodKind =
+			account !== undefined ? "account" : (kind as PairingKind);
 		if (result.ok === true && charged) this.#guessesPerIp.refund(guessKey);
 		if (result.ok === "redirect") {
 			// Given back if the sign-in pairs (the callback): the people of one
@@ -922,7 +952,7 @@ export class AuthorizationServer {
 			this.#host.logger.info("oauth.pairing_redirect", {
 				app: pending.app,
 				client: pending.client.host,
-				method: method.kind,
+				method: methodKind,
 			});
 			return new Response(null, {
 				status: 303,
@@ -951,13 +981,13 @@ export class AuthorizationServer {
 			);
 		}
 
-		return this.#paired(pending, method.kind, result);
+		return this.#paired(pending, methodKind, result);
 	}
 
 	/** Pairing succeeded: issue the authorization code and send the browser back. */
 	#paired(
 		pending: Pending,
-		kind: PairingKind,
+		kind: PairingKind | "account",
 		result: Extract<PairingResult, { ok: true }>,
 	): Response {
 		this.#dropPending(pending);
@@ -969,6 +999,7 @@ export class AuthorizationServer {
 			ip: _ip,
 			kinds: _kinds,
 			charged: _charged,
+			accounts: _accounts,
 			...request
 		} = pending;
 		const now = Date.now();
@@ -979,6 +1010,7 @@ export class AuthorizationServer {
 			expiresAt: now + this.#authCodeTtlMs,
 			used: false,
 			...(result.subject === undefined ? {} : { subject: result.subject }),
+			...(result.group === undefined ? {} : { group: result.group }),
 		});
 		this.#host.logger.info("oauth.paired", {
 			address: shortAddress(result.addressId),
@@ -1001,8 +1033,15 @@ export class AuthorizationServer {
 				"Too many requests from your network. Wait a minute and try again.",
 			);
 		}
+		const params = new URL(req.url).searchParams;
+		// One callback for every flow (DEC-232): an AI app's sign-in with a
+		// group has a `state` of its own form; everything else is identity
+		// binding's.
+		const account = AccountPairing.owns(params.get("state"))
+			? this.#host.accounts
+			: undefined;
 		const method = this.#methods.oidc;
-		if (method?.callback === undefined) {
+		if (account === undefined && method?.callback === undefined) {
 			return new Response("Not found", { status: 404 });
 		}
 		const browser = this.#browserId(req);
@@ -1014,15 +1053,17 @@ export class AuthorizationServer {
 			);
 		}
 		this.#sweepPending();
-		const params = new URL(req.url).searchParams;
-		const { requestId, result } = await method.callback(
-			params,
-			browser.id,
-			(id) => {
-				const p = this.#pending.get(id);
-				return p === undefined ? undefined : this.#host.pool(p.app);
-			},
-		);
+		const { requestId, result } =
+			account !== undefined
+				? await account.callback(params, browser.id)
+				: await (
+						method as PairingMethod & {
+							callback: NonNullable<PairingMethod["callback"]>;
+						}
+					).callback(params, browser.id, (id) => {
+						const p = this.#pending.get(id);
+						return p === undefined ? undefined : this.#host.pool(p.app);
+					});
 		const pending =
 			requestId === undefined ? undefined : this.#pending.get(requestId);
 		if (pending === undefined || pending.expiresAt <= Date.now()) {
@@ -1036,7 +1077,11 @@ export class AuthorizationServer {
 			if (pending.charged !== undefined) {
 				this.#guessesPerIp.refund(pending.charged);
 			}
-			return this.#paired(pending, method.kind, result);
+			return this.#paired(
+				pending,
+				account !== undefined ? "account" : "oidc",
+				result,
+			);
 		}
 		const message =
 			result.ok === false ? result.message : "Something went wrong.";
@@ -1050,7 +1095,11 @@ export class AuthorizationServer {
 			pending,
 			browser.id,
 			message,
-			reason === "mismatch" ? 403 : 400,
+			reason === "mismatch" ||
+				reason === "no_group" ||
+				reason === "admin_approval"
+				? 403
+				: 400,
 		);
 	}
 
@@ -1152,6 +1201,11 @@ export class AuthorizationServer {
 			targets.push(...(method.formTargets?.() ?? []));
 			scripts.push(...(method.scripts?.() ?? []));
 		}
+		const accounts =
+			pending.accounts.length > 0 && this.#host.accounts !== undefined
+				? this.#host.accounts
+				: undefined;
+		if (accounts !== undefined) targets.push(...accounts.formTargets());
 		// The app is named by its id, as in the address the user added: the
 		// relay does not know which page is meant before the pairing step
 		// finds it, and a page's own name for itself could not be checked
@@ -1187,6 +1241,7 @@ ${first?.render() ?? ""}
 ${cancel}
 </div>
 ${alternatives}
+${accounts?.render(client.name, pending.accounts) ?? ""}
 </form>
 <p class="help">After you connect, your browser goes back to ${escapeHtml(hostOf(pending.redirectUri))}. Only connect AI apps you started yourself.</p>`;
 		return this.#page(status, heading, body, targets, extra, scripts);
@@ -1594,6 +1649,7 @@ ${alternatives}
 					scopes: issued.scopes,
 					grantCreatedAt: createdAt,
 					...(issued.subject === undefined ? {} : { subject: issued.subject }),
+					...(issued.group === undefined ? {} : { group: issued.group }),
 					// Made with the client's key: its refreshes need it too (DEC-106).
 					...(client.assertion
 						? { clientAuth: "private_key_jwt" as const }
@@ -1716,6 +1772,7 @@ ${alternatives}
 				scopes: record.scopes,
 				grantCreatedAt: record.grantCreatedAt,
 				...(record.subject === undefined ? {} : { subject: record.subject }),
+				...(record.group === undefined ? {} : { group: record.group }),
 				// Once bound, always bound; a public grant refreshed with the
 				// client's key becomes bound (DEC-106).
 				...(record.clientAuth === "private_key_jwt" || client.assertion

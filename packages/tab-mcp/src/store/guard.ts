@@ -23,6 +23,8 @@ const BINDING_METHODS = [
 	"listBindings",
 	"renameBinding",
 	"deleteBinding",
+	"getGroupMode",
+	"setGroupMode",
 ] as const;
 type BindingMethod = (typeof BINDING_METHODS)[number];
 
@@ -37,7 +39,7 @@ const METHODS = [
 	...BINDING_METHODS,
 ] as const;
 
-/** Whether a store keeps browsers' sign-ins: all five binding methods (DEC-231). */
+/** Whether a store keeps browsers' sign-ins: all seven binding methods (DEC-231, DEC-232). */
 export function hasBindings(
 	store: TokenStore,
 ): store is TokenStore & Required<Pick<TokenStore, BindingMethod>> {
