@@ -342,6 +342,7 @@ registered, and opening pages in that tab.
 | `notifications` | Ask the user before a tool that is not read-only runs, or the tab goes to another site, while the side panel is not in front ("Allow once"; closing it declines). |
 | `alarms` | Wake the service worker once a minute while AI access is on, so a connection lost while the computer slept comes back. |
 | `storage` | `storage.session` only: the id of the tab the user (or the AI app, with the user's setting) pinned as the one AI apps work in, for the current browser session. Nothing is stored in `storage.local` or `storage.sync`; every other setting is in the extension's IndexedDB. |
+| `identity` | `identity.launchWebAuthFlow` only, after the user clicks "Sign in with Google", "Microsoft" or "GitHub" in the side panel: the sign-in window at the tab-mcp relay, which signs the browser in with that account so that the user's browsers signed in with it form one group, and an AI app connects once for all of them (DEC-233). The window ends at the extension's own redirect address, from which it takes a one-time code back to the relay. Not `identity.email` or `getAuthToken`: the extension reads no Google account of the browser. |
 | `http://*/*`, `https://*/*` (optional) | Asked for only when the user clicks "Give access to all sites": read every http(s) tab's WebMCP tools without a click on the icon. Or only the relay's site, when the user turns on the "Fill in the code for me" switch (off by default): on the relay's pairing page, read the AI app's name and host and the request's id from the form and, after the user allows it (or, for an AI app's host the user chose "Always allow" for, with a notification instead of a question), fill in the extension's pairing code and submit the form. |
 
 **Remote code:** No. All code is in the package. The extension lists and calls only the
@@ -362,14 +363,25 @@ sends.
     before or after is on the same origin; that stays in the browser.
   - **Website content:** the page's WebMCP tools (names, descriptions, schemas), and the
     arguments and results of the calls the AI app makes and the user allows.
-- Not collected: personally identifiable information, health, financial, authentication
-  information, personal communications, location, user activity (clicks, keystrokes).
+  - **Personally identifiable information** and **authentication information**, only
+    after the user signs in at the relay (DEC-233): the account's e-mail address or user
+    name, which the relay passes from the provider once and the extension keeps locally
+    to show "Signed in as …"; the relay keeps only a hash of the provider's stable
+    account id. The sign-in's one-time code goes from the sign-in window back to the
+    relay. (Declared conservatively, the owner's choice in DEC-233: the name is not
+    stored by the developer, the code is single-use.)
+- Not collected: health, financial, personal communications, location, user activity
+  (clicks, keystrokes).
 - Stored locally only (IndexedDB): the relay address, whether AI access is on, a random
   secret per relay that identifies this installation to it, the connected AI apps as the
   relay last listed them (grant id, name, verified host), the tools allowed per site,
-  where AI apps work (the tab in front, or a pinned tab and its id), and
-  with "Fill in the code for me" on its relay and the hosts chosen for "Always allow"
-  (PRIVACY.md has the full list). Transmitted only to the
+  where AI apps work (the tab in front, or a pinned tab and its id),
+  with "Fill in the code for me" on its relay and the hosts chosen for "Always allow",
+  and, signed in, the provider, the account's name to show, for Microsoft its kind, and
+  the relay's ids of the group's browsers (PRIVACY.md has the full list). Signed in, the
+  relay also gets the browser's name ("Chrome on macOS" or the user's), the group's
+  setting of where AI apps work and, in mode "the tab in front", that a window of the
+  browser gained the focus (nothing of the page). Transmitted only to the
   relay the user chose (by default tab-mcp.ractive.ch, run by the developer) and the AI
   app the user connected, only while AI access is on; and, inside the browser, to a page
   that uses the tab-mcp client library, only while AI access is on: the extension's

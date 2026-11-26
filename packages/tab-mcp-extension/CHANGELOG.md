@@ -35,6 +35,35 @@ and the source archive `tab-mcp-<version>-source.zip` it builds from.
 - **The `tab` argument** on `page_info`, `webmcp_tools`, `webmcp_call`, `navigate`,
   `go_back`, `go_forward` and `reload`: an id from `list_tabs`; the call goes to that
   tab and the pin stays. The `page_<name>` tools follow the tab AI apps work in.
+- **Sign-in at the relay, and your browsers as one group** (DEC-233, with relay 0.14:
+  DEC-231, DEC-232). Where the relay offers it, the panel has a card "Your browsers"
+  with "Sign in with Google / Microsoft / GitHub" (only the providers the relay offers).
+  The sign-in runs in a window of the browser (`identity.launchWebAuthFlow`) at the
+  relay's own address; the relay is the only one that talks to the provider. Every
+  browser signed in with the same account is one group: an AI app that signs in with
+  that account on the sign-in page connects once for all of them, instead of with a
+  code in each. Signed in, the card shows "Signed in as …" (for Microsoft with
+  "(personal account)" or "(work or school account)"), the browsers of the group (online
+  or not, "this browser"), each with Rename and, but this one, Remove (a second click
+  does it), the AI apps connected to all of them with Disconnect, and Sign out. A browser
+  that joins is announced with a notice and a notification. A Microsoft work account
+  whose company has to approve the app first says so ("Your organisation's administrator
+  has to approve tab-mcp relay first"). A new member's name is "<browser> on <system>"
+  ("Chrome on macOS"). The sign-in buttons wait 750 ms after they came or moved, as the
+  other controls that grant something do.
+- **Where AI apps work, signed in**: the setting is the group's, the same in every panel
+  of it; "Work here" and the first call in mode "a pinned tab" pin for the group, and a
+  tab pinned in another browser of the group runs nothing here (a call without `tab`
+  fails with that reason). The line names the browser: "AI apps work in: work Chrome ›
+  a tab there (pinned)". In mode "the tab in front" the relay hears when a window of
+  this browser gains the focus (no address, no title), so that calls go to the browser
+  in use; in mode "a pinned tab" it hears nothing of it.
+- **The `identity` permission**, for `identity.launchWebAuthFlow` alone (not
+  `identity.email`: the extension reads no account of the browser). Chrome lists no
+  warning for it, so an update does not ask for a new consent there.
+
+Without a relay that offers sign-in (an older or a self-hosted one) nothing of this
+shows, and codes work as before. Signed in or not, codes keep working.
 
 ### Changed
 

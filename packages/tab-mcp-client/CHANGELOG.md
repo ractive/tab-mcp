@@ -6,6 +6,20 @@ the Git tag `client-v<version>`. The format follows
 [Semantic Versioning](https://semver.org/). The relay has its own
 [changelog](https://github.com/ractive/tab-mcp/blob/main/packages/tab-mcp/CHANGELOG.md).
 
+## Unreleased
+
+### Added
+
+- **`relayMessages`**, for a browser extension that speaks more of the tab–relay protocol
+  than the library does (the tab-mcp browser extension's sign-in at the relay, DEC-233):
+  its `capabilities` go into `hello` (at most 16 names of `a-z`, `0-9`, `.` and `-`, else
+  `connect()` rejects with a `TypeError`), and its `receive(message, send)` gets each
+  session's `session` message as the relay sent it, then every message of a type the
+  library does not know, with a `send` for that session (`false` once it is over, a
+  `TypeError` for a type the library sends itself). The checks and the sending are in
+  the lazily loaded connection chunk; the core grew by 21 bytes gzipped. Pages need
+  nothing of it.
+
 ## [0.25.0][client-0.25.0] - 2026-11-25
 
 ### Breaking

@@ -113,7 +113,14 @@ pinned tab's id alone in the browser's session storage, as said below):
 - with "Fill in the code for me" on, the AI apps' hosts the user chose "Always allow"
   for (for example `claude.ai`) and the times of the last fills without a question (at
   most the last 3 per host, for the limit of 3 in 10 minutes); forgotten when the
-  setting goes off or the relay changes.
+  setting goes off or the relay changes;
+- while the browser is signed in at the relay (below): the provider (Google, Microsoft
+  or GitHub), the name the panel shows after "Signed in as" (Google's e-mail address,
+  Microsoft's user name, GitHub's login), for Microsoft whether the account is a
+  personal or a work or school one, and the relay's random ids of the browsers of the
+  account's group it has seen (so that a browser that joined while this one was off is
+  announced); forgotten at sign-out, when the relay says the browser is no longer
+  signed in, and when the relay changes. None of it is sent anywhere.
 
 None of this is synced to a Google account or kept outside the browser, and removing the
 extension deletes it. The grants the relay holds for connected AI apps end when the user
@@ -161,11 +168,42 @@ the call; once AI access goes off, that it went off, and then only that a call
 made before is over. The page's script can send this on to its site, whose own
 privacy policy applies.
 
+## Signing in at the relay
+
+Only where the relay offers it, and only after the user clicks "Sign in with Google",
+"Microsoft" or "GitHub" in the panel. The extension opens a sign-in window
+(`identity.launchWebAuthFlow`, the reason for the `identity` permission; not
+`identity.email`, so the extension reads no account of the browser) at the relay's own
+address, which sends the window on to the provider. What the user does there is between
+the user and the provider, under the provider's privacy policy, as for any site's
+"Sign in with …"; the extension sees none of it. The relay asks the provider only for
+what identifies the account (Google: `openid email`; Microsoft: `openid profile`;
+GitHub: no scope, its public profile). The window ends at an address of the extension's
+own that is never loaded; the extension reads the one-time code in it and sends it back
+to the relay over its connection, and only then is the browser signed in.
+
+What goes to the relay for it, beyond the connection itself: a name for this browser
+("Chrome on macOS" by default, or what the user renames it to), shown to the account's
+other browsers; the code; the user's renames and removals of the group's browsers, their
+choice of where AI apps work and, in mode "a pinned tab", the browser's id of the pinned
+tab (a number, nothing of its page); and, in mode "the tab in front" only, that a window
+of this browser gained the focus (no address, no title, no tab), so that AI apps' calls
+go to the browser in use. The relay sends back the name to show and, for Microsoft, the
+kind of account, once, and the group: its browsers' names and whether they are online,
+where calls go, and the AI apps connected to all of them.
+
+What the relay keeps: a hash of the provider and the account's stable id (never the id
+itself, the e-mail address or the name), the browser's name, when it signed in (a sign-in
+lasts 90 days), and the group's setting of where calls go. The hosted relay's policy says
+more: https://ractive.ch/tab-mcp/privacy/. A browser's own tabs never reach another
+browser of the group.
+
 ## What it does not do
 
 - No analytics, no tracking, no advertising, no crash reports.
 - No data is sold or given to third parties, other than the relay and the AI app the user
-  chose, as above, the relay's host (for the hosted relay bunny.net), and a page that uses
+  chose, as above, the sign-in provider the user chose, which sees the user's sign-in
+  there, the relay's host (for the hosted relay bunny.net), and a page that uses
   the tab-mcp library, which learns what the handshake tells it (above).
 - No use of the data for anything but passing a page's tools to the user's AI app,
   opening pages in the tab for it, and telling a page that uses the tab-mcp library which

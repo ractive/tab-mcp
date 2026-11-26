@@ -884,6 +884,36 @@ like any other, `chrome-extension://<id>` (A11).
   build is kept out of the public repository, so nobody else can load an extension with
   the id the hosted relay allows for it; a build without that key gets an id of its own,
   which a relay must allow on its own.
+- **Signing in at the relay (DEC-233; the relay's side is A16 and A17 from relay 0.14
+  on).** What the extension adds to the relay's checks:
+  - The sign-in window (`identity.launchWebAuthFlow`) opens only an address of the relay
+    in use (its origin, as configured); another one in `signin.url` is refused. The
+    window's end, the extension's redirect address, is never loaded: only the extension
+    that started the flow sees it, and it sends the one-time code back only on its own
+    connection to the relay, never to a page or to the panel. A flow that a newer one or
+    a closed connection replaced counts for nothing.
+  - Signing in grants: from then on the group's AI apps reach this browser. So the
+    buttons take no click for 750 ms after they came or moved, as "Always allow" and
+    "Work here" (ES 5, DEC-228), and the provider's own sign-in follows in a window of
+    its own.
+  - A browser that joins the group is announced in every panel and with a notification,
+    also one that joined while this browser was off (the extension keeps the member ids it
+    saw): the user's way to notice an account taken over at the provider, or a stranger who
+    got the user's code (A16), and to remove that browser. The extension cannot prevent
+    either: whoever can sign in with the account joins the group.
+  - A member of the group is in the middle of the group's calls (A17): it can pin a tab of
+    its own or claim the focus and so take the calls without `tab`, and answer them. The
+    extension fails closed where the pin is in another member: a call without `tab` that
+    still reaches it runs nothing, and the panel names the browser calls go to. A member
+    never gets another member's tabs.
+  - In mode "the tab in front" the relay learns when a window of this browser gains the
+    focus (no address, no title, no tab); in mode "a pinned tab" nothing of it.
+  - The account's name (an e-mail address for Google) and Microsoft's kind stay in the
+    extension's IndexedDB, for the panel; they go to no page, no AI app and back to no
+    relay. The member's label ("Chrome on macOS", or the user's) is what the other
+    members see.
+  - A Microsoft work account whose company requires an administrator's consent is told so
+    in the panel's words, never with the provider's raw error.
 
 ### A14: WebMCP callers of a page's mirrored tools (agents in the browser, extensions, other origins)
 

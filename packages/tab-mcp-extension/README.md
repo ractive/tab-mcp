@@ -68,6 +68,9 @@ AI app then keep to their own tabs, while the pin is one for the browser.
   closed makes every call fail with that reason and the hint to call `list_tabs`; no
   call goes to another tab by itself. Back to "the tab in front" drops the pin.
 
+Signed in at the relay, the setting and the pin are the group's: [Signing
+in](#signing-in-your-browsers-as-one-group-dec-233).
+
 The card of the tab in front ends with a line that says where calls go now ("AI apps work
 in: the tab in front", "AI apps work in: Shop (pinned)") and, for a tab the extension may
 read that is not the pinned one, "Work here". Like the switches that allow something, it
@@ -389,6 +392,67 @@ a third time; any other request asks. If another connection request's question i
 waiting already, the panel says so: type the code, or reload the page once answered. Needs a relay with the hooks
 (relay 0.12.0 and later).
 
+## Signing in: your browsers as one group (DEC-233)
+
+With a relay that offers it (the hosted relay from 0.14 on, DEC-231 and DEC-232), the
+panel has a card "Your browsers" below the tab in front. Without one (an older or a
+self-hosted relay without sign-in) the card is not there and nothing else changes: the
+extension names `signin.v1` in its `hello` (the client library's `relayMessages`), and a
+relay that does not know it answers as before. Codes keep working, signed in or not.
+
+- **Sign in** with Google, Microsoft or GitHub (the buttons are the providers the relay
+  offers, in its order). The sign-in runs in a window of the browser
+  (`identity.launchWebAuthFlow`, interactive) at the relay's own address; the relay is
+  the only OAuth client at the providers, and the window ends at the extension's own
+  redirect address (`https://<id>.chromiumapp.org/`, Firefox
+  `https://<hash>.extensions.allizom.org/`), which is never loaded: the browser hands it
+  to the extension, which sends the one-time code in it back to the relay over its
+  connection (`signin.complete`). Only then is this browser bound to the account. An
+  address that is not the relay's own is not opened. While AI access is off, there is
+  nothing to sign in with: the buttons come with the connection. Like the switches that
+  allow something, they take no click for 750 ms after they came or moved (ES 5,
+  DEC-228): signing in lets the group's AI apps reach this browser.
+- **What it says when it fails**, in its own words, never the provider's code: the window
+  closed, cancelled or refused at the provider, the relay busy or out of reach, the
+  account's browsers full (16), the code too late. A Microsoft work or school account
+  whose company lets no user consent to the app: "Your organisation's administrator has
+  to approve tab-mcp relay first." when the relay or the provider's answer says so
+  (`signin_error=admin_approval`, or an `AADSTS65001`, `AADSTS90094` or `AADSTS90095` in
+  the address the window ended at); today's relay sends only `provider_error` then, and
+  for Microsoft the panel adds that this may be the reason.
+- **Signed in**: "Signed in as <name> with <provider>", for Microsoft with "(personal
+  account)" or "(work or school account)" (one address can name both, two accounts and two
+  groups). The relay sends the name and the kind once and keeps neither; the extension
+  keeps them in its IndexedDB to show them later, and sends them nowhere. "Sign out" ends
+  the binding at the relay; so does "Disconnect all apps" (its new secret is a new browser
+  to the relay), and another relay under Settings starts signed out.
+- **The group**: every browser signed in with the same account, up to 16, each with a dot
+  (online), its name, "this browser" for this one, Rename and, for the others, Remove
+  (which asks first: "Remove? Click again", no double click). A new browser is named
+  "<browser> on <system>" ("Chrome on macOS", "Edge on Windows", "Firefox on Linux"); the
+  extension cannot read the profile's name, so rename it ("work Chrome"). A browser that
+  joins is announced in every panel of the group (a notice with OK) and with a
+  notification, also when it joined while this browser was off: the extension keeps the
+  member ids it saw. If you did not sign it in, remove it, and look after your account
+  at the provider.
+- **AI apps connected to all your browsers**: an AI app that signs in on the relay's
+  sign-in page with the same account gets one grant for the group, listed here, each with
+  Disconnect (`group.grant.revoke`, for the whole group). "Connect your AI app" says so
+  while this browser is signed in. They count as connected AI apps (the state line, the
+  icon, and the pages with the tab-mcp library are told their names).
+- **Where calls go**, signed in, is the group's setting, the same in every panel: "AI
+  apps work in" under Settings sends `group.mode`, "Work here" and the first call in mode
+  "a pinned tab" send `group.pin`, and every panel follows the relay's `group`. The pin
+  can be in another browser of the group: then a call without `tab` that reaches this
+  browser runs nothing ("The pinned tab is in another of the user's browsers; …") and the
+  line says "AI apps work in: work Chrome › a tab there (pinned)"; "Work here" moves the
+  pin here. In mode "the tab in front" the relay picks the browser whose window had the
+  focus last: this browser tells it when one of its windows gains the focus (`focus`, no
+  address, no title, no tab), once after connecting if one has it, and when the mode turns
+  to "the tab in front" from its panel; in mode "a pinned tab" it says nothing of it. Tab
+  ids stay the browser's own; the relay adds and takes off the member part
+  (`<member>:<tab>`).
+
 ## Permissions
 
 | Permission | Why |
@@ -399,6 +463,7 @@ waiting already, the panel says so: type the code, or reload the page once answe
 | `notifications` | Ask before a tool that is not read-only runs while the side panel is not in front. |
 | `alarms` | Wake the service worker once a minute while AI access is on, so a connection lost while the computer slept comes back. |
 | `storage` | `storage.session` alone: the pinned tab's id, for one browser session (DEC-230). Nothing goes into `storage.local` or `sync`. |
+| `identity` | `identity.launchWebAuthFlow` alone: the window of a sign-in at the relay (DEC-233). Not `identity.email`: the extension reads no account of the browser. |
 | `http://*/*`, `https://*/*` (optional) | Only after "Give access to all sites": read every tab of an http(s) site without a click. Or, after turning on "Fill in the code for me", the relay's site alone: its pairing page. |
 
 The manifest sets `"incognito": "not_allowed"`: Incognito tabs are never offered to an AI
@@ -406,7 +471,8 @@ app.
 
 The relay address, whether AI access is on, the tools allowed per site, the secret by
 which the relay knows this installation, the connected AI apps as the relay last listed
-them, the "Fill in the code for me" setting with its hosts and where AI apps work (the
+them, the "Fill in the code for me" setting with its hosts, where AI apps work and, signed
+in, the account's name and kind and the ids of the group's browsers it saw (the
 full list is in [PRIVACY.md](PRIVACY.md#what-it-stores)) are in IndexedDB, used by the
 service worker only, which content scripts (in the page's origin) cannot reach. The
 `storage` permission is for the pinned tab's id alone, in `storage.session`, which the
