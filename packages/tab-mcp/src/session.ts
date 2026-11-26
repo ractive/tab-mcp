@@ -424,10 +424,12 @@ export class TabSession {
 	/** Take one token of the control budget; false when it is used up. */
 	#takeControl(): boolean {
 		const now = Date.now();
+		// A clock that steps back (a correction) refills nothing, and never
+		// takes tokens away: that would end a quiet session with 4008.
+		const elapsed = Math.max(0, now - this.#controlAt);
 		this.#controlTokens = Math.min(
 			CONTROL_BURST,
-			this.#controlTokens +
-				((now - this.#controlAt) / 1000) * CONTROL_PER_SECOND,
+			this.#controlTokens + (elapsed / 1000) * CONTROL_PER_SECOND,
 		);
 		this.#controlAt = now;
 		if (this.#controlTokens < 1) return false;

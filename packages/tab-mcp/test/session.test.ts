@@ -202,3 +202,22 @@ test("DEC-202: a session that ends closes its window", async () => {
 	session.end(1000, "test over");
 	expect(session.pairingOpen).toBe(false);
 });
+
+test("a clock that steps back does not use up the control budget (no 4008)", async () => {
+	const socket = new FakeSocket();
+	const { session } = await readySession(socket);
+	const now = Date.now();
+	try {
+		// A correction of an hour back, then a few ordinary messages.
+		setSystemTime(now - 3_600_000);
+		for (let i = 0; i < 5; i++) {
+			session.handleFrame(
+				JSON.stringify({ type: "error", code: "x", message: "" }),
+			);
+		}
+		expect(socket.closedWith).toBeUndefined();
+		expect(socket.sent.some((m) => m["code"] === "rate_limited")).toBe(false);
+	} finally {
+		setSystemTime();
+	}
+});
