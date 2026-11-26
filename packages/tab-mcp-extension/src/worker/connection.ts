@@ -106,7 +106,7 @@ import {
 	saveReplaced,
 } from "./settings.ts";
 import { tabTools } from "./tab-tools.ts";
-import { kvTargetStore, Targets } from "./targets.ts";
+import { chromeSession, kvTargetStore, Targets } from "./targets.ts";
 import { createTools, INSTRUCTIONS, tabOf } from "./tools.ts";
 
 /** What a Disconnect while not connected says (it did nothing). */
@@ -319,8 +319,17 @@ export class Connection {
 		// A change of the mode or the pin: the bridge offers the tools of the
 		// tab calls go to now, and the panels show it.
 		this.#targets = new Targets(
-			kvTargetStore(kv),
-			{ front: tabInFront, tab: tabInNormalWindow },
+			kvTargetStore(kv, chromeSession()),
+			{
+				front: tabInFront,
+				tab: tabInNormalWindow,
+				// The rule of use_tab: page_info would answer.
+				mayPin: (tab) =>
+					askPage(tab).then(
+						() => true,
+						() => false,
+					),
+			},
 			() => {
 				this.tabChanged();
 				void this.#readTab();
@@ -480,9 +489,33 @@ export class Connection {
 		where: Parameters<Questions["ask"]>[1],
 	): ReturnType<Questions["ask"]> {
 		this.#recent.note(request.signal, { waiting: true });
-		const answer = await this.#questions.ask(request, where);
+		const inTab =
+			where.tabId === undefined ? undefined : await this.#otherTab(where.tabId);
+		const answer = await this.#questions.ask(request, {
+			...where,
+			...(inTab !== undefined ? { inTab } : {}),
+		});
 		this.#recent.note(request.signal, { answer });
 		return answer;
+	}
+
+	/**
+	 * For a question about tab `tabId`: its title, and whether it is the
+	 * pinned tab, if it is not the tab in front (DEC-230); else `undefined`.
+	 */
+	async #otherTab(
+		tabId: number,
+	): Promise<{ title: string; pinned: boolean } | undefined> {
+		const front = await tabInFront().catch(() => undefined);
+		if (front?.id === tabId) return undefined;
+		const [tab, setting] = await Promise.all([
+			getTab(tabId),
+			this.#targets.setting(),
+		]);
+		return {
+			title: tab?.title ?? "",
+			pinned: setting.mode === "pinned" && setting.pin === tabId,
+		};
 	}
 
 	/**
@@ -666,27 +699,30 @@ export class Connection {
 	}
 
 	/**
-	 * The page in tab `tabId` loaded or changed its tools: read again if it
-	 * is the tab in front (`active`) or the pinned tab, which need not be.
+	 * Another tab came to the front, or another window took the focus. With
+	 * a tab pinned, the tools offered are the pin's and stay so: they are not
+	 * read again (every read is a moment for Chromium issue 585631961,
+	 * DEC-177); only the panels read the new tab in front.
 	 */
-	pageChanged(tabId: number, active: boolean): void {
-		if (active) {
-			this.tabChanged();
-			return;
-		}
+	frontChanged(): void {
 		void this.#targets.setting().then((setting) => {
-			if (setting.mode === "pinned" && setting.pin === tabId) this.tabChanged();
+			if (setting.mode === "pinned" && setting.pin !== undefined)
+				void this.#readTab();
+			else this.tabChanged();
 		});
 	}
 
 	/**
-	 * The browser started: its tabs have new ids, so the pin goes (it could
-	 * name another tab now); in mode "a pinned tab" the next call pins anew.
+	 * The page in tab `tabId` loaded or changed its tools: read again if it
+	 * is the tab whose tools are offered, the tab in front (`active`) or,
+	 * with a tab pinned, the pinned one; with a tab pinned, the panels read
+	 * the tab in front of their own.
 	 */
-	browserStarted(): void {
-		void this.#targets.forgetPin().catch((error: unknown) => {
-			this.#problem = message(error);
-			this.#changed();
+	pageChanged(tabId: number, active: boolean): void {
+		void this.#targets.setting().then((setting) => {
+			const pin = setting.mode === "pinned" ? setting.pin : undefined;
+			if (pin === undefined ? active : pin === tabId) this.tabChanged();
+			else if (active) void this.#readTab();
 		});
 	}
 

@@ -149,6 +149,9 @@ export function createManifest(
 			"notifications",
 			"scripting",
 			"sidePanel",
+			// `storage.session` alone: the pinned tab, for one browser session
+			// (DEC-230). Nothing goes into `storage.local` or `sync`.
+			"storage",
 		],
 		// Sites only: http(s), the pages "allowed" and the navigation rules
 		// know (ES 9). Not `file:` pages.
@@ -206,7 +209,14 @@ export function createFirefoxManifest(
 			default_icon: icons,
 			open_at_install: false,
 		},
-		permissions: ["activeTab", "alarms", "notifications", "scripting"],
+		// `storage` for `storage.session` alone: the pinned tab (DEC-230).
+		permissions: [
+			"activeTab",
+			"alarms",
+			"notifications",
+			"scripting",
+			"storage",
+		],
 		optional_host_permissions: SITE_MATCHES,
 		...(options.test || options.allSites
 			? { host_permissions: SITE_MATCHES }

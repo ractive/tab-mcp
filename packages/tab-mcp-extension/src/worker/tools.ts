@@ -176,8 +176,15 @@ export function createTools(
 			annotations: { readOnlyHint: false, untrustedContentHint: true },
 			execute: async (args, options) => {
 				const { name, arguments: input } = args;
-				const target = await tabs.current(tabOf(args));
-				return bridge().callByName(String(name), input ?? {}, options, target);
+				const named = tabOf(args);
+				const target = await tabs.current(named);
+				return bridge().callByName(
+					String(name),
+					input ?? {},
+					options,
+					target,
+					named !== undefined,
+				);
 			},
 		},
 	];

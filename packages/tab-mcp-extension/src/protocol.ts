@@ -125,6 +125,13 @@ export interface QuestionView {
 	 */
 	navigation?: { to: string };
 	/**
+	 * The call is for a tab that is not the tab in front (the pinned one, or
+	 * one its `tab` argument named, DEC-230): that tab's title (the page's
+	 * text, "" if none), and whether it is the pinned tab. The card says so,
+	 * so that two tabs of one site are not taken for each other.
+	 */
+	inTab?: { title: string; pinned: boolean };
+	/**
 	 * Not a tool: whether to fill in the extension's code on the relay's
 	 * pairing page for this AI app (DEC-203). `name` is its own name for
 	 * itself ("" if none); `host` above is the one the relay verified.

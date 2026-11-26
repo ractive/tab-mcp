@@ -341,6 +341,7 @@ registered, and opening pages in that tab.
 | `sidePanel` | The side panel shows the connection's state, the pairing address and code, the tab's tools and the questions before a tool runs or the tab goes to another site. |
 | `notifications` | Ask the user before a tool that is not read-only runs, or the tab goes to another site, while the side panel is not in front ("Allow once"; closing it declines). |
 | `alarms` | Wake the service worker once a minute while AI access is on, so a connection lost while the computer slept comes back. |
+| `storage` | `storage.session` only: the id of the tab the user (or the AI app, with the user's setting) pinned as the one AI apps work in, for the current browser session. Nothing is stored in `storage.local` or `storage.sync`; every other setting is in the extension's IndexedDB. |
 | `http://*/*`, `https://*/*` (optional) | Asked for only when the user clicks "Give access to all sites": read every http(s) tab's WebMCP tools without a click on the icon. Or only the relay's site, when the user turns on the "Fill in the code for me" switch (off by default): on the relay's pairing page, read the AI app's name and host and the request's id from the form and, after the user allows it (or, for an AI app's host the user chose "Always allow" for, with a notification instead of a question), fill in the extension's pairing code and submit the form. |
 
 **Remote code:** No. All code is in the package. The extension lists and calls only the

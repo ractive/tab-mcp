@@ -146,11 +146,6 @@ const sync = () =>
 	);
 chrome.runtime.onInstalled.addListener(sync);
 chrome.runtime.onStartup.addListener(sync);
-// A browser start gives its tabs new ids: the pinned tab's id is no tab's
-// any more, or another's (DEC-230).
-chrome.runtime.onStartup.addListener(() =>
-	withConnection((c) => c.browserStarted()),
-);
 
 /**
  * Firefox, after an install, reload or update: the content script into every
@@ -159,7 +154,7 @@ chrome.runtime.onStartup.addListener(() =>
  * until a new script takes over, and the page's own calls throw meanwhile.
  * Chrome keeps the tools itself, and its page-world polyfill outlives the
  * extension's reload. Not after a disable and enable: Firefox tells the
- * extension nothing of it, and without the `storage` permission (DEC-116) a
+ * extension nothing of it, and without a marker of its own for that a
  * first start can't be told from the event page waking; a page gets the
  * script when the worker reads its tab (`tabs.ts`) or at a click.
  */
@@ -192,7 +187,9 @@ const permissionsChanged = () => {
 };
 chrome.permissions.onAdded.addListener(permissionsChanged);
 chrome.permissions.onRemoved.addListener(permissionsChanged);
-chrome.tabs.onActivated.addListener(tabChanged);
+// Another tab in front: read again unless a tab is pinned (DEC-230).
+const frontChanged = () => withConnection((c) => c.frontChanged());
+chrome.tabs.onActivated.addListener(frontChanged);
 // What the worker kept for a tab's pairing page (DEC-213) goes with the tab.
 chrome.tabs.onRemoved.addListener((tabId) =>
 	withConnection((c) => c.tabClosed(tabId)),
@@ -204,7 +201,7 @@ chrome.tabs.onUpdated.addListener((id, change, tab) => {
 	if (change.status === "complete")
 		withConnection((c) => c.pageChanged(id, tab.active));
 });
-chrome.windows.onFocusChanged.addListener(tabChanged);
+chrome.windows.onFocusChanged.addListener(frontChanged);
 
 // Content scripts may say only this: the page's tools changed (`toolchange`)
 // (it counts in an active tab or the pinned one), or the page announced the

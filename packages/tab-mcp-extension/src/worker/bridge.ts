@@ -648,6 +648,12 @@ export class PageToolBridge {
 	#callable = new Map<string, Callable>();
 	/** The schemas and validators of the last read, by `keyOf`. */
 	#compiled = new Map<string, Compiled>();
+	/**
+	 * Those of the last read of a tab whose tools are not offered (the
+	 * panel's tab in front while a pinned one is, a `tab` argument): read
+	 * again and again, it compiles each tool once.
+	 */
+	#otherCompiled = new Map<string, Compiled>();
 	#state: BridgeState = { available: false, tools: [] };
 	/** The refresh running, and whether another was asked for meanwhile. */
 	#running: Promise<void> | undefined;
@@ -733,13 +739,16 @@ export class PageToolBridge {
 	 * rules as its `page_<name>` tool, for AI apps that read their tool list
 	 * once and so do not see `page_<name>` tools that came later. `tab`: the
 	 * tab the call is for (a `tab` argument, or the target); one whose tools
-	 * are not the ones offered is read for this call alone.
+	 * are not the ones offered is read for this call alone. `named`: a `tab`
+	 * argument named it, so it stays the call's tab whatever comes to the
+	 * front or is pinned meanwhile.
 	 */
 	async callByName(
 		name: string,
 		args: unknown,
 		options: ToolExecuteCallbackOptions,
 		tab?: TargetTab,
+		named = false,
 	): Promise<unknown> {
 		// A page that does not answer is given up by the read itself; the AI
 		// app's cancel ends the wait too.
@@ -750,7 +759,18 @@ export class PageToolBridge {
 		if (tab === undefined || tab.id === this.#state.tabId) {
 			callable = this.#callable.get(name);
 			state = this.#state;
-			now = async () => this.#callable.get(name);
+			// A tab the call's `tab` argument named stays its tab throughout
+			// (DEC-230): after the question its tool is looked up there, in
+			// the offered tools only while they are still that tab's.
+			now =
+				named && tab !== undefined
+					? async () =>
+							this.#state.tabId === tab.id
+								? this.#callable.get(name)
+								: (
+										await this.#readOther(tab).catch(() => undefined)
+									)?.callable.get(name)
+					: async () => this.#callable.get(name);
 		} else {
 			const read = await Promise.race([
 				this.#readOther(tab),
@@ -920,7 +940,9 @@ export class PageToolBridge {
 
 	/** The tools of `tab`, a tab whose tools are not offered, for one call. */
 	async #readOther(tab: TargetTab): Promise<Made> {
-		return this.#make(tab, await this.#list(tab));
+		const made = this.#make(tab, await this.#list(tab));
+		this.#otherCompiled = made.compiled;
+		return made;
 	}
 
 	async #read(): Promise<void> {
@@ -1026,7 +1048,10 @@ export class PageToolBridge {
 			// The schema and its validator once per tool as offered, not on
 			// every refresh (each tab switch, each toolchange).
 			const key = keyOf(tab.id, tools.documentId, pageTool);
-			const made = this.#compiled.get(key) ?? compile(pageTool);
+			const made =
+				this.#compiled.get(key) ??
+				this.#otherCompiled.get(key) ??
+				compile(pageTool);
 			compiled.set(key, made);
 			if ("problem" in made) {
 				entry.problem = made.problem;

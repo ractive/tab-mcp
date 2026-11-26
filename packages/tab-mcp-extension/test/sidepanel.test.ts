@@ -799,6 +799,41 @@ describe("a tab the extension may not read (the owner's words, iteration 51)", (
 	});
 });
 
+describe("a question for a tab that is not in front (DEC-230)", () => {
+	test("its card names that tab, pinned or not, as text; the short announcement says another tab; the tab in front gets no line", async () => {
+		const panel = await openPanel();
+		const other = {
+			...question("q1"),
+			inTab: { title: "Shop <b>2</b>", pinned: true },
+		};
+		panel.show(stateWith([], [other]));
+		const line = panel.$('[data-question="q1"] .in-tab');
+		expect(line?.textContent).toBe("In another tab Shop <b>2</b> (pinned)");
+		expect(line?.querySelector("b")).toBeNull();
+		await Bun.sleep(80);
+		expect(panel.$("#question-status-modal")?.textContent).toBe(
+			"Claude (claude.ai) asks to run page_place_order in another tab.",
+		);
+		panel.show(
+			stateWith(
+				[],
+				[
+					{
+						...question("q2"),
+						inTab: { title: "", pinned: false },
+						navigation: { to: "https://other.example/" },
+					},
+				],
+			),
+		);
+		expect(panel.$('[data-question="q2"] .in-tab')?.textContent).toBe(
+			"In another tab (no title)",
+		);
+		panel.show(stateWith([], [question("q3")]));
+		expect(panel.$('[data-question="q3"] .in-tab')).toBeNull();
+	});
+});
+
 describe("where AI apps work (DEC-230)", () => {
 	/** The state with the shop's tab (id 5) and `target`. */
 	const at = (target?: PanelState["target"], tabId = 5): PanelState => {

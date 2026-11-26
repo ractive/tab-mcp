@@ -87,7 +87,8 @@ browser's settings, for which relay, so that the panel can say why it is off.
 
 ## What it stores
 
-In the extension's own IndexedDB in the browser, used by its service worker only:
+In the extension's own IndexedDB in the browser, used by its service worker only (the
+pinned tab's id alone in the browser's session storage, as said below):
 
 - the address of the relay the user chose (by default `https://tab-mcp.ractive.ch`);
 - whether AI access is on, and whether another tab or program took its place at the
@@ -103,8 +104,9 @@ In the extension's own IndexedDB in the browser, used by its service worker only
 - the tools the user allowed to run without asking, per site: the site's origin and the
   tool names;
 - where AI apps' calls go ("the tab in front" or "a pinned tab") and, in the second
-  case, the browser's id of the pinned tab (a number, nothing of its page), forgotten
-  at the next browser start;
+  case, the browser's id of the pinned tab (a number, nothing of its page), kept in the
+  browser's session storage (`storage.session`), which the browser empties when it
+  starts again;
 - with "Fill in the code for me" on, the relay it is on for; when it went off because the
   user took the relay's site away in the browser's settings, that relay instead, for the
   panel's note;

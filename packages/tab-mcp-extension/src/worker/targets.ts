@@ -8,8 +8,9 @@
  * call's `tab` argument (an id from list_tabs) always wins and leaves the
  * pin as it is.
  *
- * The mode and the pin live behind `TargetStore`: the worker's IndexedDB for
- * now; later the relay's record of a signed-in group. Tab ids are the
+ * The mode and the pin live behind `TargetStore`: for now the mode in the
+ * worker's IndexedDB and the pin in the browser session's storage
+ * (`kvTargetStore`); later the relay's record of a signed-in group. Tab ids are the
  * browser's, as decimal strings; a group's will carry a member before them
  * (`<member>:<tab>`), which the relay takes off before the call reaches the
  * extension.
@@ -46,11 +47,62 @@ export function parseTargetSetting(stored: unknown): TargetSetting {
 		: { mode };
 }
 
-/** The setting in the worker's IndexedDB (`kv.ts`), as `allowedTools` is. */
-export function kvTargetStore(kv: Kv): TargetStore {
+/** A store of the browser session: what `chrome.storage.session` gives. */
+export interface SessionArea {
+	get(key: string): Promise<Record<string, unknown>>;
+	set(items: Record<string, unknown>): Promise<void>;
+	remove(key: string): Promise<void>;
+}
+
+const PIN = "pinnedTab";
+
+/**
+ * The mode in the worker's IndexedDB (`kv.ts`), as `allowedTools` is; the
+ * pin in `session`, `chrome.storage.session`, which the browser empties with
+ * every browser session (tab ids start anew then, and an old pin could name
+ * another tab) and which content scripts cannot reach. A pin of the session
+ * before is so never read, whatever the extension was told of the start
+ * (nothing, when it was off then).
+ */
+export function kvTargetStore(kv: Kv, session: SessionArea): TargetStore {
 	return {
-		load: async () => parseTargetSetting(await kv.get(KEY)),
-		save: (setting) => kv.set({ [KEY]: setting }),
+		async load() {
+			const { mode } = parseTargetSetting(await kv.get(KEY));
+			if (mode === "front") return { mode };
+			const pin = (await session.get(PIN))[PIN];
+			return parseTargetSetting({ mode, pin });
+		},
+		async save({ mode, pin }) {
+			await kv.set({ [KEY]: { mode } });
+			if (pin === undefined) await session.remove(PIN);
+			else await session.set({ [PIN]: pin });
+		},
+	};
+}
+
+/** `chrome.storage.session` as a `SessionArea`. */
+export function chromeSession(): SessionArea {
+	return {
+		get: (key) => chrome.storage.session.get(key),
+		set: (items) => chrome.storage.session.set(items),
+		remove: (key) => chrome.storage.session.remove(key),
+	};
+}
+
+/** A `SessionArea` in memory, for tests (no product code uses it). */
+export function memorySession(): SessionArea & {
+	data: Map<string, unknown>;
+} {
+	const data = new Map<string, unknown>();
+	return {
+		data,
+		get: async (key) => (data.has(key) ? { [key]: data.get(key) } : {}),
+		async set(items) {
+			for (const [key, value] of Object.entries(items)) data.set(key, value);
+		},
+		async remove(key) {
+			data.delete(key);
+		},
 	};
 }
 
@@ -60,6 +112,8 @@ export interface TargetChrome {
 	front(): Promise<TargetTab>;
 	/** Tab `id` if it is open in a normal window, `undefined` otherwise. */
 	tab(id: number): Promise<TargetTab | undefined>;
+	/** Whether the extension may read `tab` now (`page_info` would answer). */
+	mayPin(tab: TargetTab): Promise<boolean>;
 }
 
 /** What a call that cannot find its tab tells the AI app to do. */
@@ -122,7 +176,12 @@ export class Targets {
 			if (setting.mode === "front") return this.#chrome.front();
 			if (setting.pin !== undefined) return this.#pinned(setting.pin);
 			const front = await this.#chrome.front();
-			await this.#save({ mode: "pinned", pin: front.id });
+			// Only a tab the extension may read, as use_tab pins: a new tab
+			// page or a tab without a grant is answered as in mode "the tab
+			// in front" (the call says why it cannot read it), and the next
+			// call may pin.
+			if (await this.#chrome.mayPin(front))
+				await this.#save({ mode: "pinned", pin: front.id });
 			return front;
 		});
 	}
@@ -170,18 +229,6 @@ export class Targets {
 			const setting = await this.setting();
 			if (setting.mode === mode) return;
 			await this.#save({ mode });
-		});
-	}
-
-	/**
-	 * The browser started: its tabs have new ids, and the pin's id may name
-	 * another tab now. The mode stays; the next call pins anew.
-	 */
-	forgetPin(): Promise<void> {
-		return this.#serial(async () => {
-			const setting = await this.setting();
-			if (setting.pin === undefined) return;
-			await this.#save({ mode: setting.mode });
 		});
 	}
 

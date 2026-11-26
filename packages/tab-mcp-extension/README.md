@@ -59,8 +59,11 @@ AI app then keep to their own tabs, while the pin is one for the browser.
 
 - **the tab in front** (the default, as before): calls go to the active tab of the window
   you used last.
-- **a pinned tab**: the first call pins the tab in front at that moment; later calls go
-  to that tab wherever you are, and switching tabs moves nothing. "Work here" in the
+- **a pinned tab**: the first call pins the tab in front at that moment, if the extension
+  may read it (else the call is answered as for the tab in front, and the next call may
+  pin); later calls go to that tab wherever you are, and switching tabs moves nothing:
+  the pinned tab's tools are not read again for it (only the panel reads the tab in
+  front). "Work here" in the
   card of the tab in front pins that tab, as `use_tab` does. A pinned tab that was
   closed makes every call fail with that reason and the hint to call `list_tabs`; no
   call goes to another tab by itself. Back to "the tab in front" drops the pin.
@@ -70,9 +73,15 @@ in: the tab in front", "AI apps work in: Shop (pinned)") and, for a tab the exte
 read that is not the pinned one, "Work here". Like the switches that allow something, it
 takes no click for 750 ms after it came, the tab changed or it moved. With a tab pinned,
 the card still lists the tools of the tab in front (read for the panel), with their
-"Always allow" switches. A browser start forgets the pin (the browser's tab ids start
-anew), not the setting. A page with the tab-mcp client library is no longer told that the
-extension serves only the tab in front (`whileInFront: false`).
+"Always allow" switches. The pin is kept in `storage.session`, which the browser empties
+with every browser session (its tab ids start anew), the setting in IndexedDB. A question
+for a tab that is not the tab in front (the pinned one, or one a `tab` argument named)
+says "In another tab" with that tab's title, and "(pinned)" for the pinned tab, so that
+two tabs of one site are not taken for each other; its notification says "in another
+tab". A `tab` argument names its tab throughout a call: another tab coming to the front
+or being pinned while you are asked does not stop it. A page with the tab-mcp client
+library is no longer told that the extension serves only the tab in front
+(`whileInFront: false`).
 
 The navigation tools act only on a tab the extension may read now (a click on its icon
 there, or "Give access to all sites"); on any other tab they do nothing and say why:
@@ -389,17 +398,21 @@ waiting already, the panel says so: type the code, or reload the page once answe
 | `sidePanel` | The side panel: the connection's state, pairing, the tab's tools, the questions. |
 | `notifications` | Ask before a tool that is not read-only runs while the side panel is not in front. |
 | `alarms` | Wake the service worker once a minute while AI access is on, so a connection lost while the computer slept comes back. |
+| `storage` | `storage.session` alone: the pinned tab's id, for one browser session (DEC-230). Nothing goes into `storage.local` or `sync`. |
 | `http://*/*`, `https://*/*` (optional) | Only after "Give access to all sites": read every tab of an http(s) site without a click. Or, after turning on "Fill in the code for me", the relay's site alone: its pairing page. |
 
 The manifest sets `"incognito": "not_allowed"`: Incognito tabs are never offered to an AI
 app.
 
-No `storage` permission: the relay address, whether AI access is on, the tools allowed per
-site, the secret by which the relay knows this installation, the connected AI apps as the
-relay last listed them and the "Fill in the code for me" setting with its hosts (the full
-list is in [PRIVACY.md](PRIVACY.md#what-it-stores)) are in IndexedDB, used by
-the service worker only, which content scripts (in the page's origin) cannot reach; there
-is no `chrome.storage` area for them to read or write.
+The relay address, whether AI access is on, the tools allowed per site, the secret by
+which the relay knows this installation, the connected AI apps as the relay last listed
+them, the "Fill in the code for me" setting with its hosts and where AI apps work (the
+full list is in [PRIVACY.md](PRIVACY.md#what-it-stores)) are in IndexedDB, used by the
+service worker only, which content scripts (in the page's origin) cannot reach. The
+`storage` permission is for the pinned tab's id alone, in `storage.session`, which the
+browser empties with every browser session (tab ids start anew then) and which content
+scripts cannot reach either; `storage.local` and `sync`, which they could, hold nothing
+(up to iteration 53 the extension had no `storage` permission at all).
 
 Chrome's own WebMCP is on only where a site takes part in Chrome's
 [origin trial](https://developer.chrome.com/blog/ai-webmcp-origin-trial) (Chrome 149 to

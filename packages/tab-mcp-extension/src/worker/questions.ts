@@ -39,6 +39,8 @@ export const NOTIFICATION_GUARD_MS = 500;
  * them in full (the relay caps a request at 1 MiB).
  */
 export const MAX_ARGS_NOTIFICATION = 150;
+/** The title of the tab a question is for, when it is not in front, is cut to this. */
+export const MAX_TAB_TITLE = 200;
 /** What a notification says when it cut the arguments. */
 export const ARGS_CUT_NOTE = "Arguments cut: click to see them in full.";
 
@@ -161,12 +163,17 @@ export function notificationText(
 	const note = argsCut ? `\n${ARGS_CUT_NOTE}` : "";
 	// A navigation (iteration 27): where the tab would go, from which site.
 	const { navigation } = view;
+	// Not the tab in front (DEC-230): said, the title is in the panel.
+	const other = view.inTab !== undefined;
 	return {
 		title: `Allow ${what}?`,
 		message: navigation
-			? cut(`${view.app} wants to take the tab to ${navigation.to}`, 300)
+			? cut(
+					`${view.app} wants to take ${other ? "another tab" : "the tab"} to ${navigation.to}`,
+					300,
+				)
 			: cut(
-					`${view.app} wants to run ${view.tool}${summary === "{}" ? "." : `: ${summary}`}`,
+					`${view.app} wants to run ${view.tool}${other ? " in another tab" : ""}${summary === "{}" ? "." : `: ${summary}`}`,
 					300 - note.length,
 				) + note,
 		// Closing it answers too (EQ 13). Chrome names the extension above.
@@ -251,7 +258,12 @@ export class Questions {
 	 */
 	ask(
 		request: AppRequest,
-		where: { tabId?: number; origin?: string; navigation?: { to: string } },
+		where: {
+			tabId?: number;
+			origin?: string;
+			navigation?: { to: string };
+			inTab?: { title: string; pinned: boolean };
+		},
 	): Promise<Answer | "timeout" | "busy"> {
 		const id = crypto.randomUUID();
 		const json = visible(JSON.stringify(request.arguments, null, 2) ?? "{}");
@@ -264,6 +276,14 @@ export class Questions {
 			...(where.origin ? { origin: where.origin } : {}),
 			...(where.navigation
 				? { navigation: { to: visible(where.navigation.to) } }
+				: {}),
+			...(where.inTab
+				? {
+						inTab: {
+							title: cut(visible(where.inTab.title), MAX_TAB_TITLE),
+							pinned: where.inTab.pinned,
+						},
+					}
 				: {}),
 			// In full: what the user approves must be there to read.
 			args: json,

@@ -44,10 +44,13 @@ const transpiler = new Bun.Transpiler({ loader: "ts" });
 
 /**
  * Whether TypeScript `source` uses `chrome.storage` or `browser.storage` in
- * its code: comments left out by the transpiler, strings kept whole.
+ * its code other than its `session` area: comments left out by the
+ * transpiler, strings kept whole.
  */
 function usesStorage(source: string): boolean {
-	return /\b(chrome|browser)\.storage\b/.test(transpiler.transformSync(source));
+	return /\b(chrome|browser)\.storage\b(?!\.session\b)/.test(
+		transpiler.transformSync(source),
+	);
 }
 
 describe("manifest", () => {
@@ -67,6 +70,7 @@ describe("manifest", () => {
 			"notifications",
 			"scripting",
 			"sidePanel",
+			"storage",
 		]);
 	});
 
@@ -79,10 +83,13 @@ describe("manifest", () => {
 		expect(store["host_permissions"]).toBeUndefined();
 	});
 
-	test("no build has the storage permission, and no code uses chrome.storage: the settings are in IndexedDB, where a content script cannot reach", async () => {
-		// Without the permission Chrome and Firefox give no `storage` area at
-		// all, in the worker or in a content script's world (where a page's
-		// compromised renderer would run its code with the extension's APIs).
+	test("no code uses chrome.storage but its session area, in the worker alone: the settings are in IndexedDB, where a content script cannot reach", async () => {
+		// The `storage` permission is for `storage.session` alone, the pinned
+		// tab of one browser session (DEC-230), which content scripts cannot
+		// reach (its access level stays the default, trusted contexts). The
+		// areas a content script's world could read (where a page's
+		// compromised renderer would run its code with the extension's APIs),
+		// `local` and `sync`, hold nothing.
 		for (const manifest of [
 			createManifest("1.0.0", {}),
 			createManifest("1.0.0", { test: true }),
@@ -91,9 +98,22 @@ describe("manifest", () => {
 			createFirefoxManifest("1.0.0", { test: true }),
 			createFirefoxManifest("1.0.0", { allSites: true }),
 		]) {
-			expect(manifest["permissions"]).not.toContain("storage");
+			expect(manifest["permissions"]).toContain("storage");
 			expect(manifest["permissions"]).not.toContain("unlimitedStorage");
 		}
+		expect(usesStorage("chrome.storage.session.get('k');")).toBe(false);
+		const sessionUsers: string[] = [];
+		for await (const file of new Bun.Glob("**/*.ts").scan(
+			join(import.meta.dir, "../src"),
+		)) {
+			const text = await Bun.file(join(import.meta.dir, "../src", file)).text();
+			if (/\bchrome\.storage\.session\b/.test(transpiler.transformSync(text)))
+				sessionUsers.push(file);
+		}
+		expect(sessionUsers).toEqual(["worker/targets.ts"]);
+		expect(
+			await Bun.file(join(import.meta.dir, "../src/worker/targets.ts")).text(),
+		).not.toContain("setAccessLevel");
 		// The settings go through kv.ts (IndexedDB in the extension's origin).
 		// The check itself: a use is seen also on a line with a URL in a
 		// string, and a comment that names the API is not one.

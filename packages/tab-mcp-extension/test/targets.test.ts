@@ -20,6 +20,7 @@ import { type TabList, tabTools } from "../src/worker/tab-tools.ts";
 import {
 	kvTargetStore,
 	LIST_TABS_HINT,
+	memorySession,
 	parseTargetSetting,
 	type TargetSetting,
 	Targets,
@@ -60,14 +61,22 @@ const options = (): ToolExecuteCallbackOptions => ({
  * extension may not read (3, its title not shown to it), each with tools of
  * its own; the targets, the bridge and the tools wired as the worker does.
  */
-function world(setting?: TargetSetting) {
+function world(
+	setting?: TargetSetting,
+	more: {
+		/** The shop's tools (its `search` by default). */
+		shopTools?: PageTool[];
+		/** The user's answer to a question, after anything the test does then. */
+		confirm?: () => Promise<void>;
+	} = {},
+) {
 	const tabs: FakeTab[] = [
 		{
 			id: 1,
 			url: "https://shop.example/",
 			title: "Shop",
 			readable: true,
-			tools: [readOnly("search")],
+			tools: more.shopTools ?? [readOnly("search")],
 		},
 		{
 			id: 2,
@@ -92,7 +101,12 @@ function world(setting?: TargetSetting) {
 		url: t.readable ? t.url : "",
 		title: t.readable ? t.title : "",
 	});
-	const kv = memoryKv(setting === undefined ? {} : { aiTarget: setting });
+	// The mode in IndexedDB, the pin in the session's storage.
+	const kv = memoryKv(
+		setting === undefined ? {} : { aiTarget: { mode: setting.mode } },
+	);
+	const session = memorySession();
+	if (setting?.pin !== undefined) session.data.set("pinnedTab", setting.pin);
 	const frontTab = async () => {
 		const t = open(front);
 		if (t === undefined) throw new Error("No tab is in front.");
@@ -100,7 +114,7 @@ function world(setting?: TargetSetting) {
 	};
 	let changes = 0;
 	const targets = new Targets(
-		kvTargetStore(kv),
+		kvTargetStore(kv, session),
 		{
 			front: frontTab,
 			tab: async (id) => {
@@ -109,6 +123,7 @@ function world(setting?: TargetSetting) {
 					? view(t)
 					: undefined;
 			},
+			mayPin: async (tab) => open(tab.id)?.readable === true,
 		},
 		() => changes++,
 	);
@@ -150,7 +165,14 @@ function world(setting?: TargetSetting) {
 			},
 			settled: async () => ({}),
 		},
-		{ callIn: (id) => targets.callIn(id) },
+		{
+			callIn: (id) => targets.callIn(id),
+			confirm: async () => {
+				if (more.confirm === undefined)
+					throw new Error("The user did not allow this call.");
+				await more.confirm();
+			},
+		},
 	);
 	const steps: { tabId: number; step: Step }[] = [];
 	const own = [
@@ -209,7 +231,13 @@ function world(setting?: TargetSetting) {
 			const t = tabs.find((x) => x.id === id);
 			if (t) t.closed = true;
 		},
-		stored: async () => parseTargetSetting(await kv.get("aiTarget")),
+		session,
+		/** The setting as the two stores hold it. */
+		stored: async () => {
+			const { mode } = parseTargetSetting(await kv.get("aiTarget"));
+			const pin = session.data.get("pinnedTab");
+			return parseTargetSetting({ mode, pin });
+		},
 	};
 }
 
@@ -344,10 +372,31 @@ describe("mode: a pinned tab", () => {
 		expect(await w.stored()).toEqual({ mode: "pinned" });
 	});
 
-	test("a browser start forgets the pin (its id may be another tab's), not the mode", async () => {
-		const w = world({ mode: "pinned", pin: 2 });
-		await w.targets.forgetPin();
+	test("the pin lives in the session's storage, the mode in IndexedDB: a new browser session has the mode and no pin", async () => {
+		const w = world({ mode: "pinned" });
+		await pageInfo(w);
+		expect(w.kv.data.get("aiTarget")).toEqual({ mode: "pinned" });
+		expect(w.session.data.get("pinnedTab")).toBe(1);
+		// The next browser session: the browser emptied the session's storage
+		// (also when the extension was off at its start). A new Targets reads
+		// the stores afresh.
+		const store = kvTargetStore(w.kv, memorySession());
+		expect(await store.load()).toEqual({ mode: "pinned" });
+		// Back to the tab in front: the pin goes from the session's storage too.
+		await w.targets.setMode("front");
+		expect(w.session.data.has("pinnedTab")).toBe(false);
+		expect(w.kv.data.get("aiTarget")).toEqual({ mode: "front" });
+	});
+
+	test("the first call does not pin a tab in front the extension may not read; the next one in front that it may read is pinned", async () => {
+		const w = world({ mode: "pinned" });
+		w.front(3);
+		// Answered as in mode "the tab in front": why it cannot be read.
+		await expect(pageInfo(w)).rejects.toThrow("may not read this tab yet");
 		expect(await w.stored()).toEqual({ mode: "pinned" });
+		w.front(2);
+		expect((await pageInfo(w)).title).toBe("Docs");
+		expect(await w.stored()).toEqual({ mode: "pinned", pin: 2 });
 	});
 
 	test("a page tool offered from a tab that is no longer the pinned one does not run", async () => {
@@ -370,6 +419,38 @@ describe("the tab argument", () => {
 		const f = world();
 		expect((await pageInfo(f, { tab: "2" })).title).toBe("Docs");
 		expect(await f.kv.get("aiTarget")).toBeUndefined();
+	});
+
+	test("a tab named that is the offered one stays the call's tab: another tab in front during the question does not stop it", async () => {
+		const buy: PageTool = {
+			name: "buy",
+			description: "Buys.",
+			inputSchema: { type: "object" },
+			annotations: { readOnlyHint: false },
+		};
+		let w: ReturnType<typeof world>;
+		w = world(undefined, {
+			shopTools: [buy],
+			// The user switches to the docs tab while asked; its tools are read.
+			confirm: async () => {
+				w.front(2);
+				await w.bridge.refresh();
+			},
+		});
+		await w.bridge.refresh();
+		expect([...w.registered.keys()]).toEqual(["page_buy"]);
+		expect(await w.call("webmcp_call", { name: "buy", tab: "1" })).toBe(
+			"done in 1",
+		);
+		expect(w.calls).toEqual([{ tabId: 1, name: "buy" }]);
+		// Without tab the call is for the tab in front, which changed: it
+		// does not run, as before.
+		w.front(1);
+		await w.bridge.refresh();
+		await expect(
+			w.call("webmcp_call", { name: "buy" }) as Promise<unknown>,
+		).rejects.toThrow("changed while the user was asked");
+		expect(w.calls).toHaveLength(1);
 	});
 
 	test("webmcp_tools and webmcp_call reach another tab's tools; the page tools offered stay the target's", async () => {

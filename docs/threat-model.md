@@ -826,8 +826,9 @@ like any other, `chrome-extension://<id>` (A11).
   the extension's own origin and opened by the service worker only. The extension's
   scripts in a page run in that page's origin and cannot open that database, so a page
   whose renderer is compromised can neither read the secret (and take the extension's place
-  from anywhere, A4) nor allow its own tools. The extension asks for no `storage`
-  permission, so there is no `chrome.storage` area those scripts could read or write.
+  from anywhere, A4) nor allow its own tools. The extension's `storage` permission is
+  for `storage.session` alone (the pinned tab's id for one browser session, DEC-230),
+  which those scripts cannot reach; it reads nothing from the areas they could write.
 - **Filling in its code on the relay's page** (DEC-203). When an AI app opens the
   relay's `/authorize` page in the same browser, the extension can write its own code
   into the form and submit it, after its user's Allow. One click is less than opening
