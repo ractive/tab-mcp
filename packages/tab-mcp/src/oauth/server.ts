@@ -1095,7 +1095,11 @@ export class AuthorizationServer {
 			pending,
 			browser.id,
 			message,
-			reason === "mismatch" || reason === "no_group" ? 403 : 400,
+			reason === "mismatch" ||
+				reason === "no_group" ||
+				reason === "admin_approval"
+				? 403
+				: 400,
 		);
 	}
 

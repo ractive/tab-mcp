@@ -225,10 +225,14 @@ budget of its own ([Group grants](#group-grants)).
 4. The relay sends the browser to `redirectUrl?signin=<code>`: a random completion
    code, single use, valid 2 minutes, for this sign-in and its session. On a failure it
    sends `redirectUrl?signin_error=<reason>` instead: `provider_error` (the provider
-   sent no code: cancelled, refused), `unchecked` (the code or the account did not
-   check out), `session_gone` (the session that started the sign-in is gone, or another
+   sent no code: cancelled, refused), `admin_approval` (Microsoft refused because the
+   account's organisation must approve the relay first: AADSTS65001, AADSTS90094 or
+   AADSTS90095 in the callback's `error_description` or in the token endpoint's
+   `error_description` or `error_codes`; relay 0.14 on, DEC-232), `unchecked` (the code
+   or the account did not check out), `session_gone` (the session that started the sign-in is gone, or another
    session of its address replaced it; nothing is redeemed then), `cancelled` (Cancel
-   on the relay's page). Either URL ends `launchWebAuthFlow`.
+   on the relay's page). Either URL ends `launchWebAuthFlow`. The provider's own
+   description is never passed on; a tab shows its own text for each reason.
 5. The extension sends `signin.complete` with the code. The relay binds the session's
    address id to the account and sends `signin.done` and `group`.
 
@@ -276,7 +280,10 @@ when it pairs. The account's key (as for a browser's sign-in) selects the group.
 when the group exists, that is when at least one browser is signed in with the account,
 online or not; the page says so beside the buttons. Without one the page says: "No
 browser is signed in with this … account. In the tab-mcp browser extension, sign in with
-the same account, then sign in here again, or type the code." The grant is the group's:
+the same account, then sign in here again, or type the code." A Microsoft sign-in refused
+for an administrator's approval (as `admin_approval` above) gets "This account's
+organisation requires an administrator to approve tab-mcp relay first.", never
+Microsoft's text. The grant is the group's:
 its token record names the group (`group`) and has the group's own address id,
 `group:<group key>`, which no page has. Members never see one another's address ids, and
 an AI app sees only the members' ids and labels.

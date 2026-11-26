@@ -17,7 +17,7 @@ import { randomBase64url } from "../crypto.ts";
 import { JwtError } from "../jwt.ts";
 import type { Logger } from "../log.ts";
 import { escapeHtml } from "../oauth/html.ts";
-import { OidcError } from "../oauth/oidc.ts";
+import { needsAdminApproval, OidcError } from "../oauth/oidc.ts";
 import type { PairingContext, PairingResult } from "../oauth/pairing.ts";
 import type { TokenStore } from "../store/types.ts";
 import type { SignInProvider } from "./providers.ts";
@@ -28,6 +28,9 @@ const FLOW_TTL_MS = 10 * 60_000;
 const MAX_FLOWS = 10_000;
 /** The `state` of an AI app's sign-in starts with this (a browser's: `browser.`). */
 const STATE_PREFIX = "account.";
+/** A sign-in refused until the account's organisation approves the relay (DEC-232). */
+const ADMIN_APPROVAL =
+	"This account's organisation requires an administrator to approve tab-mcp relay first.";
 /** The form's `action` of a provider's button: `account.<provider>`. */
 const ACTION_PREFIX = "account.";
 
@@ -234,6 +237,12 @@ ${buttons}
 				provider: provider.id,
 				error: (error ?? "no_code").slice(0, 64),
 			});
+			if (
+				error !== null &&
+				needsAdminApproval(params.get("error_description"))
+			) {
+				return fail("admin_approval", ADMIN_APPROVAL);
+			}
 			return fail(
 				`provider_${(error ?? "no_code").slice(0, 32)}`,
 				`The sign-in with ${provider.name} did not finish. Try again, or type the code.`,
@@ -250,6 +259,9 @@ ${buttons}
 				reason,
 				message: (e instanceof Error ? e.message : "unknown").slice(0, 200),
 			});
+			if (e instanceof OidcError && e.adminApproval) {
+				return fail("admin_approval", ADMIN_APPROVAL);
+			}
 			return fail(
 				reason,
 				`The sign-in with ${provider.name} could not be checked. Try again, or type the code.`,

@@ -6126,6 +6126,13 @@ say, decided here; the conservative choice where the owner had not decided, mark
 - **A grant listing that fails** (review of PR 258) does not hold back the `group`
   message: it goes with the grants of the last announcement, or none; only a failed
   `listBindings` suppresses it.
+- **Microsoft's admin approval** (coordinator, for the extension's PR 4). A Microsoft
+  refusal whose `error_description` (on the callback or from the token endpoint) or
+  `error_codes` names AADSTS65001, AADSTS90094 or AADSTS90095 is a reason of its own:
+  a browser's sign-in redirects with `signin_error=admin_approval` (else
+  `provider_error` or `unchecked`, as before), and the pairing page says "This
+  account's organisation requires an administrator to approve tab-mcp relay first."
+  (403). Only the codes are read; the provider's text is never sent on or logged.
 - **Where a call goes.** `tab` `<member>:<tab>` first (the member taken off, also in an
   `mcp-param-tab` header); else the pin's member; else the member whose window had the
   focus last, else the one that came online last, and the result says so. Mode pinned

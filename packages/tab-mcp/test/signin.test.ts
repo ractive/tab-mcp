@@ -67,6 +67,8 @@ afterEach(async () => {
 	current = undefined;
 	fakes.tamper = undefined;
 	fakes.deny = undefined;
+	fakes.denyDescription = undefined;
+	fakes.tokenError = undefined;
 	fakes.githubTokenError = undefined;
 	fakes.google = { sub: "g-alice", email: "alice@gmail.example" };
 	fakes.microsoft = {
@@ -613,6 +615,44 @@ describe("signing in with Google", () => {
 		const { answer } = await throughProvider(await beginSignIn(tab, "google"));
 		expect(answer.location).toBe(redirectError("provider_error"));
 		expect(await quietFor(tab)).toEqual([]);
+	});
+
+	test("Microsoft's refusal for an administrator's approval is admin_approval, on the callback and at the token endpoint; its text is never passed on (DEC-232)", async () => {
+		const ctx = start();
+		for (const code of ["AADSTS65001", "AADSTS90094", "AADSTS90095"]) {
+			fakes.deny = "consent_required";
+			fakes.denyDescription = `${code}: The user or administrator has not consented to use the application with ID 'x' named 'secret-tenant-app'.`;
+			const { answer } = await throughProvider(
+				await beginSignIn(await extension(ctx), "microsoft"),
+			);
+			expect(answer.location).toBe(redirectError("admin_approval"));
+		}
+		// Another description is any provider error.
+		fakes.denyDescription = "AADSTS50126: Error validating credentials.";
+		let { answer } = await throughProvider(
+			await beginSignIn(await extension(ctx), "microsoft"),
+		);
+		expect(answer.location).toBe(redirectError("provider_error"));
+		fakes.deny = undefined;
+		fakes.denyDescription = undefined;
+		// The same at the token endpoint, by the description or by error_codes.
+		for (const tokenError of [
+			{ error: "invalid_grant", error_description: "AADSTS65001: no consent" },
+			{ error: "invalid_grant", error_codes: [90094] },
+		]) {
+			fakes.tokenError = tokenError;
+			({ answer } = await throughProvider(
+				await beginSignIn(await extension(ctx), "microsoft"),
+			));
+			expect(answer.location).toBe(redirectError("admin_approval"));
+		}
+		fakes.tokenError = { error: "invalid_grant", error_codes: [70008] };
+		({ answer } = await throughProvider(
+			await beginSignIn(await extension(ctx), "microsoft"),
+		));
+		expect(answer.location).toBe(redirectError("unchecked"));
+		expect(ctx.logs.lines.join("\n")).not.toContain("secret-tenant-app");
+		expect(ctx.logs.lines.join("\n")).not.toContain("no consent");
 	});
 });
 

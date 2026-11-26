@@ -31,7 +31,7 @@ import { JwtError } from "../jwt.ts";
 import { errorFields, type Logger, truncateKey } from "../log.ts";
 import { displayName } from "../oauth/cimd.ts";
 import { escapeHtml, pageHeaders, renderPage } from "../oauth/html.ts";
-import { OidcError } from "../oauth/oidc.ts";
+import { needsAdminApproval, OidcError } from "../oauth/oidc.ts";
 import {
 	type GrantInfo,
 	type GroupMessage,
@@ -1308,7 +1308,11 @@ export class BrowserSignIn {
 				provider: provider.id,
 				error: (error ?? "no_code").slice(0, 64),
 			});
-			return failed("provider_error");
+			return failed(
+				error !== null && needsAdminApproval(params.get("error_description"))
+					? "admin_approval"
+					: "provider_error",
+			);
 		}
 		if (!this.#current(flow)) return failed("session_gone");
 		let account: SignInAccount;
@@ -1330,7 +1334,11 @@ export class BrowserSignIn {
 				reason,
 				message: detail.slice(0, 200),
 			});
-			return failed("unchecked");
+			return failed(
+				e instanceof OidcError && e.adminApproval
+					? "admin_approval"
+					: "unchecked",
+			);
 		}
 		if (this.#completions.size >= MAX_FLOWS) {
 			const oldest = this.#completions.keys().next().value;

@@ -138,6 +138,8 @@ export type SignInFailure =
  */
 export type SignInRedirectError =
 	| "provider_error"
+	/** Microsoft: the account's organisation must approve the relay first (DEC-232). */
+	| "admin_approval"
 	| "unchecked"
 	| "session_gone"
 	| "cancelled";

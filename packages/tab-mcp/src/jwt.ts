@@ -210,11 +210,18 @@ export async function fetchJson(
 		throw new Error(`not JSON (${url}, HTTP ${res.status})`);
 	}
 	if (!res.ok) {
-		const error = (value as Record<string, unknown> | null)?.["error"];
+		const body = (value ?? {}) as Record<string, unknown>;
+		const error = body["error"];
+		const description = body["error_description"];
+		const codes = body["error_codes"];
 		throw new HttpJsonError(
 			res.status,
 			typeof error === "string" ? error : "",
 			url,
+			typeof description === "string" ? description.slice(0, 1000) : "",
+			Array.isArray(codes)
+				? codes.filter((c): c is number => typeof c === "number").slice(0, 16)
+				: [],
 		);
 	}
 	return value;
@@ -224,10 +231,24 @@ export class HttpJsonError extends Error {
 	override name = "HttpJsonError";
 	readonly status: number;
 	readonly error: string;
-	constructor(status: number, error: string, url: string) {
+	/**
+	 * The answer's `error_description` and `error_codes` (Microsoft's), for
+	 * telling one error from another; never shown or logged as they are.
+	 */
+	readonly description: string;
+	readonly codes: readonly number[];
+	constructor(
+		status: number,
+		error: string,
+		url: string,
+		description = "",
+		codes: readonly number[] = [],
+	) {
 		super(`HTTP ${status}${error === "" ? "" : ` ${error}`} (${url})`);
 		this.status = status;
 		this.error = error;
+		this.description = description;
+		this.codes = codes;
 	}
 }
 

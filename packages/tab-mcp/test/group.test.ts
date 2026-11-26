@@ -78,6 +78,9 @@ afterEach(async () => {
 	await current?.relay.stop();
 	current = undefined;
 	fakes.google = { sub: "g-alice", email: "alice@gmail.example" };
+	fakes.deny = undefined;
+	fakes.denyDescription = undefined;
+	fakes.tokenError = undefined;
 });
 
 /** A memory store whose group grants can fail to list, as a store that is down. */
@@ -1073,6 +1076,56 @@ describe("pairing an AI app with a group by signing in", () => {
 		const next = (await refreshed.json()) as { access_token: string };
 		const again = await call(ctx, next.access_token, "page_info");
 		expect(lastText(again)).toContain("Answered by");
+	});
+
+	test("Microsoft's refusal for an administrator's approval says so on the page, never in Microsoft's words (DEC-232)", async () => {
+		const ctx = start({
+			signIn: {
+				apps: [APP],
+				providers: { microsoft: fakes.clients.microsoft },
+			},
+		});
+		const text =
+			"This account's organisation requires an administrator to approve tab-mcp relay first.";
+		const cases: [() => void, string][] = [
+			[
+				() => {
+					fakes.deny = "consent_required";
+					fakes.denyDescription =
+						"AADSTS90094: An administrator of secret-tenant has set a policy.";
+				},
+				text,
+			],
+			[
+				() => {
+					fakes.deny = undefined;
+					fakes.denyDescription = undefined;
+					fakes.tokenError = {
+						error: "invalid_grant",
+						error_description: "AADSTS65001: secret-tenant has not consented.",
+						error_codes: [65001],
+					};
+				},
+				text,
+			],
+			[
+				() => {
+					fakes.tokenError = { error: "invalid_grant", error_codes: [70008] };
+				},
+				"The sign-in with Microsoft could not be checked. Try again, or type the code.",
+			],
+		];
+		for (const [arrange, expected] of cases) {
+			arrange();
+			const { browser, page } = await openPage(ctx);
+			const redirect = await browser.submit(page, {
+				action: "account.microsoft",
+			});
+			const back = await viaProvider(browser, redirect.location ?? "");
+			expect(back.html).toContain(expected.replaceAll("'", "&#39;"));
+			expect(back.html).not.toContain("secret-tenant");
+			if (expected === text) expect(back.status).toBe(403);
+		}
 	});
 
 	test("an account without a signed-in browser pairs nothing and says what to do", async () => {
