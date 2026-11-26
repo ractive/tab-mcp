@@ -218,6 +218,24 @@ there wait as after any other change.
       work accounts. Client ids and secrets through tofu and the keychain, never in git
 - [ ] Try a sign-in with the work Entra ID account once the app exists
 
+Done or known so far (2026-11-26):
+
+- **GitHub**: OAuth App "tab-mcp relay", client id `Ov23litK0ROOKaHzH01W` (not
+  secret; into `variables.tf` as `tab_mcp_relay_github_client_id`). Its secret goes into
+  the Keychain item `ractive-ch-tab-mcp-github-client-secret`, and for CI plans into
+  the ractive.ch repository secret `TAB_MCP_RELAY_GITHUB_CLIENT_SECRET`, as the Google
+  one (`TAB_MCP_RELAY_GOOGLE_CLIENT_SECRET`).
+- **Google**: the relay's existing client from identity binding is reused
+  (`tab_mcp_relay_google_client_id` in ractive.ch's `infra/tab-mcp/variables.tf`, a web
+  application with the callback above; secret in `ractive-ch-tab-mcp-google-client-secret`).
+  Its consent screen must be "In production", not "Testing" (testing allows only listed
+  test users), and its app name should be what browsers' users recognise
+  ("tab-mcp relay").
+- **Logos**: the relay's icon (`packages/tab-mcp/scripts/favicon.svg`) as PNG, 512, 240
+  and 120 px, for GitHub, Microsoft and Google.
+- The Keychain cannot be written from an agent's shell on this Mac ("User interaction is
+  not allowed"): the owner adds items in a terminal of their own.
+
 ## Open decisions
 
 - How long a browser's sign-in lasts without a new one (proposal: 90 days, DEC-062).
