@@ -225,6 +225,14 @@ Done or known so far (2026-11-26):
   the Keychain item `ractive-ch-tab-mcp-github-client-secret`, and for CI plans into
   the ractive.ch repository secret `TAB_MCP_RELAY_GITHUB_CLIENT_SECRET`, as the Google
   one (`TAB_MCP_RELAY_GOOGLE_CLIENT_SECRET`).
+- **Microsoft**: app registration "tab-mcp relay", multi-tenant with personal accounts,
+  application (client) id `aae32a2a-bef7-4fdb-9422-9d5df62b78e5` (not secret; into
+  `variables.tf` as `tab_mcp_relay_microsoft_client_id`); the relay uses the `common`
+  endpoint, so no tenant id is configured. Its secret goes into the Keychain item
+  `ractive-ch-tab-mcp-microsoft-client-secret` and **expires on 2028-11-26** (24 months,
+  Microsoft's longest): a new one before then, or sign-in with Microsoft stops. Publisher
+  verification (for Entra ID work accounts) is still to do: ractive.ch's
+  `/.well-known/microsoft-identity-association.json` and the partner program id.
 - **Google**: the relay's existing client from identity binding is reused
   (`tab_mcp_relay_google_client_id` in ractive.ch's `infra/tab-mcp/variables.tf`, a web
   application with the callback above; secret in `ractive-ch-tab-mcp-google-client-secret`).
