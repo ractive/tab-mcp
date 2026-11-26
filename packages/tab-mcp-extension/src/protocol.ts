@@ -144,6 +144,11 @@ export interface TabView {
 	 * connected to it directly (the page's word).
 	 */
 	library?: { apps: { name: string; host: string }[] };
+	/**
+	 * Chrome's id of the tab: the panel tells a switch to another tab (the
+	 * user's) from a change of the same tab's tools (the page's).
+	 */
+	tabId?: number;
 	title: string;
 	host: string;
 	/** `undefined`: the extension may not read it, `noAccess` or `access` says why. */

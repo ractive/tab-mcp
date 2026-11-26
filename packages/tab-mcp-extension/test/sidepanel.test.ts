@@ -579,6 +579,9 @@ describe("Always allow all, a switch over the list", () => {
 	test("on allows the tools listed at the click; changed under the pointer it waits and allows nothing; off asks again", async () => {
 		const panel = await openPanel();
 		const head = () => panel.$<HTMLInputElement>("#allow-tools");
+		// The page's tools read, none yet; then the page registers one.
+		panel.show(stateWith([]));
+		panel.later(WAIT_MS);
 		panel.show(stateWith([tool("place_order")]));
 		// The switch just came: it waits, as a click meant for what was there
 		// before would land on it.
@@ -636,6 +639,64 @@ describe("Always allow all, a switch over the list", () => {
 				on: false,
 			},
 		]);
+	});
+});
+
+describe("a switch to another tab", () => {
+	/** `state` as the worker sends it for the tab with Chrome's id `tabId`. */
+	const onTab = (tabId: number, state: PanelState, read = true): PanelState => {
+		const tab = { ...state.tab, tabId } as NonNullable<PanelState["tab"]>;
+		if (!read) delete tab.origin;
+		return { ...state, tab };
+	};
+	const quietNow = (panel: { doc: Document }) =>
+		panel.doc.body.hasAttribute("data-quiet");
+
+	test("its list shows at once whether a tool is allowed and waits unseen; the page's own change waits in the disabled look", async () => {
+		const panel = await openPanel();
+		const head = () => panel.$<HTMLInputElement>("#allow-tools");
+		// The panel opens on a tab: the list waits, unseen.
+		panel.show(onTab(1, stateWith([tool("place_order", true)])));
+		expect(panel.$<HTMLInputElement>(switchOf("place_order"))?.checked).toBe(
+			true,
+		);
+		expect(disabled(panel.$(switchOf("place_order")))).toBeNull();
+		expect(disabled(head())).toBeNull();
+		expect(quietNow(panel)).toBe(true);
+		panel.take();
+		panel.$<HTMLInputElement>(switchOf("place_order"))?.click();
+		head()?.click();
+		expect(panel.take()).toEqual([]);
+		panel.later(WAIT_MS);
+		expect(quietNow(panel)).toBe(false);
+		// Another tab comes to the front, read first without its tools, then
+		// with them, however late (the page may hold its read back): unseen
+		// again.
+		panel.show(onTab(2, stateWith([]), false));
+		panel.later(3000);
+		panel.show(onTab(2, stateWith([tool("add_note", true), tool("clear")])));
+		const allowed = panel.$<HTMLInputElement>(switchOf("add_note"));
+		expect(allowed?.checked).toBe(true);
+		expect(disabled(allowed)).toBeNull();
+		expect(quietNow(panel)).toBe(true);
+		panel.$<HTMLInputElement>(switchOf("clear"))?.click();
+		expect(panel.take()).toEqual([]);
+		panel.later(WAIT_MS);
+		panel.$<HTMLInputElement>(switchOf("clear"))?.click();
+		expect(panel.take()).toEqual([
+			{ type: "set-allowed", origin: SITE, name: "clear", on: true },
+		]);
+		// The same tab's page adds a tool: the wait in the disabled look.
+		panel.show(
+			onTab(2, stateWith([tool("add_note", true), tool("clear"), tool("x")])),
+		);
+		expect(disabled(head())).toBe("true");
+		expect(disabled(panel.$(switchOf("clear")))).toBe("true");
+		panel.later(WAIT_MS);
+		// Back to the first tab: unseen again.
+		panel.show(onTab(1, stateWith([tool("place_order", true)])));
+		expect(disabled(panel.$(switchOf("place_order")))).toBeNull();
+		expect(quietNow(panel)).toBe(true);
 	});
 });
 

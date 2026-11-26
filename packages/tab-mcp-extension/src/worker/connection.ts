@@ -1187,6 +1187,7 @@ export class Connection {
 					? this.#late.pending(tab.id, state.documentId)
 					: state.tabId !== tab.id && this.#late.pending(tab.id, undefined));
 			view = {
+				tabId: tab.id,
 				title: page.title || tab.title || host || "(no title)",
 				host,
 				// The tools the bridge lists for this page; the page's own count
@@ -1223,6 +1224,7 @@ export class Connection {
 			};
 		} catch (error) {
 			view = {
+				tabId: tab.id,
 				title: tab.title || host || "(no title)",
 				host,
 				// An access problem in the panel's own words (EQ 6).
