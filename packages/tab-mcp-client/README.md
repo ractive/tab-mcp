@@ -396,10 +396,10 @@ that an AI app reaches it through the extension:
   snapshot's `extension`): while the extension serves the page,
   `{ name, apps, whileInFront }`. `apps` are the AI apps connected to the
   extension now, each `{ name, host }` (the AI app's own name and the host the relay
-  verified), empty while none is. `whileInFront`: the extension serves only the tab in
-  front of its window, so say "while this tab is in front". Extensions before
-  iteration 53 say `true`; later ones `false`, as an AI app can work in a pinned tab
-  or name any tab it may read (DEC-230). `undefined` without
+  verified), empty while none is. `whileInFront`: `true` when the extension serves only
+  the tab in front of its window, so you can say "while this tab is in front". Older
+  extensions always say `true`; newer ones say `false`, as an AI app can work in a
+  pinned tab or name any tab the extension may read (DEC-230). `undefined` without
   the extension, while its AI access is off, and without WebMCP. While AI access is off,
   the extension answers no page and sends it nothing (DEC-221); a page it served hears
   once that it stopped. It does not tell its version. The connect dialog says

@@ -95,9 +95,10 @@ export interface BrowserExtension {
 	 */
 	apps: readonly { name: string; host: string }[];
 	/**
-	 * The extension serves only the tab in front of its window: say "while
-	 * this tab is in front" when telling the user that an app is connected
-	 * through it.
+	 * `true`: the extension serves only the tab in front of its window, so
+	 * "while this tab is in front" may be said when telling the user that an
+	 * app is connected through it. Newer extensions say `false`: an AI app
+	 * can work in a pinned tab or name any tab the extension may read.
 	 */
 	whileInFront: boolean;
 }
