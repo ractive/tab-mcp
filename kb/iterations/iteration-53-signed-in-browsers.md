@@ -63,9 +63,14 @@ Decided in the conversation (DEC-229):
 |---|---|---|---|
 | Google | OpenID Connect | `iss` + `sub` | as `oidc.ts` today |
 | Microsoft | OpenID Connect, multi-tenant (`/common`) | `tid` + `oid` | the issuer names the tenant: check it as `https://login.microsoftonline.com/{tid}/v2.0` with the token's own `tid`; `sub` differs per app, `oid` does not. Personal and Entra ID work accounts. |
-| GitHub | OAuth 2.0, no OpenID Connect | numeric `id` from `GET https://api.github.com/user` | its own adapter; the login name can change, so it is not the key |
+| GitHub | OAuth 2.0, no OpenID Connect | numeric `id` from `GET https://api.github.com/user` | a small module of its own in the relay (no ID token to verify): code for access token, one `GET /user`, the token discarded; the login name can change, so it is not the key |
 
-Scopes: `openid email profile` (Microsoft, Google), `read:user` (GitHub). Nothing more.
+Scopes: `openid email profile` (Microsoft, Google); none at GitHub, where `GET /user`
+returns the public profile with the `id` without one. Nothing more.
+
+One callback for every provider and both flows (a browser's sign-in, an AI app's):
+`https://<relay>/authorize/callback`, as `oidc.ts` has it; the flow's `state` says which
+provider and which sign-in it belongs to.
 
 **Entra ID work accounts**: whether employees may consent is the company's setting. The
 default for tenants allows consent only to apps of a verified publisher, so the relay's
@@ -206,9 +211,11 @@ there wait as after any other change.
 
 ### The owner
 
-- [ ] Register the relay's OAuth app at Google, GitHub and Microsoft (Microsoft:
+- [ ] Register the relay's OAuth app at Google, GitHub and Microsoft, each with the
+      callback `https://tab-mcp.ractive.ch/authorize/callback`. GitHub: an OAuth App
+      without scopes (a GitHub App without permissions works too). Microsoft:
       multi-tenant, personal and work accounts; publisher verification for Entra ID
-      work accounts); client ids and secrets through tofu and the keychain, never in git
+      work accounts. Client ids and secrets through tofu and the keychain, never in git
 - [ ] Try a sign-in with the work Entra ID account once the app exists
 
 ## Open decisions
