@@ -5959,7 +5959,9 @@ days. Decided in the conversation:
   over linking codes between browsers: "a nicer design".
 - Codes stay for people who do not want to sign in; such a browser is on its own.
 - No linking of accounts across providers for now.
-- Backwards compatible: existing addresses, grants, extensions and relays keep working.
+- Backwards compatible where it matters: older extensions keep working with the new
+  relay, and existing addresses and grants stay. The new extension need not work with
+  an older relay; the hosted relay is deployed first.
 - One mode per group, "the tab in front" (default) or "a pinned tab"; the target changes
   on purpose (`use_tab`, "Work here"), never as a side effect of switching tabs or
   browsers. `list_tabs`, `use_tab` and an optional `tab` argument.

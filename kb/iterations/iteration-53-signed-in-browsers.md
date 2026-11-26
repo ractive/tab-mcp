@@ -9,7 +9,7 @@ description: >-
   grant for the whole group instead of one per browser. Calls go to the tab in front of
   the browser used last (default) or to a pinned tab; list_tabs, use_tab and an optional
   tab argument let the AI choose. Codes stay for everyone who does not sign in, and
-  everything that works today keeps working (owner, 2026-11-26: backwards compatible).
+  older extensions keep working with the new relay (owner, 2026-11-26).
 timestamp: 2026-11-26T09:00:00+01:00
 tags: [iteration, relay, extension, oauth, pairing, security]
 ---
@@ -29,7 +29,9 @@ Decided in the conversation (DEC-229):
   today.
 - **No linking of accounts** across providers for now: a Google account and a GitHub
   account are two groups.
-- **Backwards compatible**: nothing that works today breaks (details below).
+- **Backwards compatible** where it matters: older extensions keep working with the new
+  relay, and existing addresses and grants stay; the new extension need not work with
+  an older relay (details below).
 - **Mode**: "the tab in front" (default) or "a pinned tab", one setting per group; the
   target changes on purpose, never as a side effect (the owner: "way better").
 - **`list_tabs` and `use_tab`**, and an optional `tab` argument (the owner: "would be
@@ -41,7 +43,8 @@ Decided in the conversation (DEC-229):
 ### Signing in a browser
 
 - The panel offers "Sign in with Google / GitHub / Microsoft" when the relay's `session`
-  message says it supports sign-in for this app. The extension runs
+  message says sign-in is configured for this app (a relay without providers, such as a
+  self-hosted one, offers codes only). The extension runs
   `identity.launchWebAuthFlow` (Chrome, Edge and Firefox have it) at a relay URL; the
   relay is the only OAuth client at the providers (it already is one for `oidc`,
   `src/oauth/oidc.ts`, variant 1 of [identity binding](/design/identity-binding.md)), and
@@ -139,10 +142,14 @@ there wait as after any other change.
 
 ## Backwards compatibility
 
-- **Protocol**: additions only (sign-in, group state, focus, a tool call to several
-  members). The extension sees in the relay's `session` message what the relay offers
-  and works as today with a relay that offers none of it (older or self-hosted relays).
-  A relay of this iteration serves today's extensions unchanged.
+- **Older extensions with the new relay** (owner, 2026-11-26): the store copies update
+  on their own schedule, so the relay keeps serving today's extensions unchanged. The
+  protocol only gains messages (sign-in, group state, focus, a tool call to several
+  members), which an older extension never sends and never receives: the relay sends
+  them only to an extension that announced them in its `hello`.
+- **The new extension with an older relay: not supported** (owner, 2026-11-26). The
+  extension of this iteration may require a relay of this iteration; the hosted relay is
+  deployed before the extension's store release.
 - **Addresses and grants**: `/s/tab-mcp-extension/mcp` and
   `/s/tab-mcp-extension-firefox/mcp` stay; every existing grant, token and refresh keeps
   working; the token store gains a group column, existing rows mean "page grant".
