@@ -1,6 +1,8 @@
 import { Database } from "bun:sqlite";
 import { summarizeGrants } from "./memory.ts";
 import type {
+	BindingRecord,
+	BindingSelector,
 	GrantSummary,
 	RevokeOptions,
 	RevokeSelector,
@@ -9,7 +11,7 @@ import type {
 	TokenStore,
 } from "./types.ts";
 
-const SCHEMA_VERSION = 6;
+const SCHEMA_VERSION = 7;
 /**
  * The oldest schema a relay must know to use a file of this version safely,
  * kept in the file's `meta` table (review of PR 65). A relay refuses a file
@@ -17,7 +19,8 @@ const SCHEMA_VERSION = 6;
  * a column an older relay would drop raises it, and older relays from this
  * one on refuse to open that file rather than quietly lose the column.
  * Version 6 added `app` (DEC-196): an older relay would drop it, and it
- * serves addresses that no longer exist.
+ * serves addresses that no longer exist. Version 7 added the `bindings`
+ * table (DEC-231), which an older relay leaves alone: it stays 6.
  */
 const MIN_READER_VERSION = 6;
 /** The reuse window of used refresh tokens (DEC-091), for the version 4 step. */
@@ -59,6 +62,30 @@ function toRecord(row: Row): TokenRecord {
 	if (row.client_auth === "private_key_jwt")
 		record.clientAuth = "private_key_jwt";
 	return record;
+}
+
+interface BindingRow {
+	address_id: string;
+	group_key: string;
+	member_id: string;
+	provider: string;
+	app: string;
+	label: string;
+	created_at: number;
+	expires_at: number;
+}
+
+function toBinding(row: BindingRow): BindingRecord {
+	return {
+		addressId: row.address_id,
+		group: row.group_key,
+		memberId: row.member_id,
+		provider: row.provider,
+		app: row.app,
+		label: row.label,
+		createdAt: row.created_at,
+		expiresAt: row.expires_at,
+	};
 }
 
 /**
@@ -157,6 +184,21 @@ export class SqliteTokenStore implements TokenStore {
 					"ALTER TABLE tokens ADD COLUMN app TEXT NOT NULL DEFAULT ''",
 				);
 			}
+			// Version 7: browsers' sign-ins (DEC-231). A table of its own, so
+			// the rows of the tokens table stay as they are.
+			this.#db.run(`CREATE TABLE IF NOT EXISTS bindings (
+				address_id TEXT PRIMARY KEY,
+				group_key TEXT NOT NULL,
+				member_id TEXT NOT NULL UNIQUE,
+				provider TEXT NOT NULL,
+				app TEXT NOT NULL,
+				label TEXT NOT NULL,
+				created_at INTEGER NOT NULL,
+				expires_at INTEGER NOT NULL
+			) STRICT`);
+			this.#db.run(
+				"CREATE INDEX IF NOT EXISTS bindings_group ON bindings (group_key)",
+			);
 			this.#db.run(`CREATE TABLE IF NOT EXISTS nonces (
 				key TEXT PRIMARY KEY,
 				expires_at INTEGER NOT NULL
@@ -171,13 +213,16 @@ export class SqliteTokenStore implements TokenStore {
 				"CREATE INDEX IF NOT EXISTS tokens_expires ON tokens (expires_at)",
 			);
 			// Version 4: refresh tokens used before the upgrade get the reuse
-			// window that markUsed now gives (DEC-091), so they go too.
-			this.#db
-				.query(
-					`UPDATE tokens SET expires_at = min(expires_at, used_at + $window)
-					WHERE kind = 'refresh' AND used_at IS NOT NULL`,
-				)
-				.run({ window: REUSE_WINDOW_MS });
+			// window that markUsed now gives (DEC-091), so they go too. Only
+			// from files before it: a later step leaves the tokens alone.
+			if (row.user_version < 4) {
+				this.#db
+					.query(
+						`UPDATE tokens SET expires_at = min(expires_at, used_at + $window)
+						WHERE kind = 'refresh' AND used_at IS NOT NULL`,
+					)
+					.run({ window: REUSE_WINDOW_MS });
+			}
 			this.#db.run(`PRAGMA user_version = ${SCHEMA_VERSION}`);
 		})();
 	}
@@ -297,6 +342,9 @@ export class SqliteTokenStore implements TokenStore {
 			.query("DELETE FROM revocations WHERE keep_until <= $now")
 			.run({ now });
 		this.#db.query("DELETE FROM nonces WHERE expires_at <= $now").run({ now });
+		this.#db
+			.query("DELETE FROM bindings WHERE expires_at <= $now")
+			.run({ now });
 		return this.#db
 			.query("DELETE FROM tokens WHERE expires_at <= $now")
 			.run({ now }).changes;
@@ -316,6 +364,100 @@ export class SqliteTokenStore implements TokenStore {
 			)
 			.run({ key, expires_at: expiresAt, now });
 		return result.changes === 1;
+	}
+
+	/** Counted and written in one transaction, so the group's last place goes once. */
+	async putBinding(
+		record: BindingRecord,
+		maxMembers: number,
+		now: number,
+	): Promise<"ok" | "full"> {
+		return this.#db.transaction(() => {
+			const row = this.#db
+				.query(
+					`SELECT count(*) AS n FROM bindings WHERE group_key = $group
+					AND address_id != $address_id AND expires_at > $now`,
+				)
+				.get({
+					group: record.group,
+					address_id: record.addressId,
+					now,
+				}) as { n: number };
+			if (row.n >= maxMembers) return "full" as const;
+			this.#db
+				.query(
+					`INSERT OR REPLACE INTO bindings (address_id, group_key, member_id,
+					provider, app, label, created_at, expires_at)
+					VALUES ($address_id, $group, $member_id, $provider, $app, $label,
+					$created_at, $expires_at)`,
+				)
+				.run({
+					address_id: record.addressId,
+					group: record.group,
+					member_id: record.memberId,
+					provider: record.provider,
+					app: record.app,
+					label: record.label,
+					created_at: record.createdAt,
+					expires_at: record.expiresAt,
+				});
+			return "ok" as const;
+		})();
+	}
+
+	async getBinding(
+		addressId: string,
+		now: number,
+	): Promise<BindingRecord | undefined> {
+		const row = this.#db
+			.query(
+				"SELECT * FROM bindings WHERE address_id = $id AND expires_at > $now",
+			)
+			.get({ id: addressId, now }) as BindingRow | null;
+		return row === null ? undefined : toBinding(row);
+	}
+
+	async listBindings(group: string, now: number): Promise<BindingRecord[]> {
+		const rows = this.#db
+			.query(
+				`SELECT * FROM bindings WHERE group_key = $group AND expires_at > $now
+				ORDER BY created_at, member_id`,
+			)
+			.all({ group, now }) as BindingRow[];
+		return rows.map(toBinding);
+	}
+
+	async renameBinding(
+		group: string,
+		memberId: string,
+		label: string,
+		now: number,
+	): Promise<boolean> {
+		const result = this.#db
+			.query(
+				`UPDATE bindings SET label = $label WHERE group_key = $group
+				AND member_id = $member_id AND expires_at > $now`,
+			)
+			.run({ label, group, member_id: memberId, now });
+		return result.changes === 1;
+	}
+
+	async deleteBinding(
+		selector: BindingSelector,
+	): Promise<BindingRecord | undefined> {
+		const row = (
+			"addressId" in selector
+				? this.#db
+						.query("DELETE FROM bindings WHERE address_id = $id RETURNING *")
+						.get({ id: selector.addressId })
+				: this.#db
+						.query(
+							`DELETE FROM bindings WHERE group_key = $group
+							AND member_id = $member_id RETURNING *`,
+						)
+						.get({ group: selector.group, member_id: selector.memberId })
+		) as BindingRow | null;
+		return row === null ? undefined : toBinding(row);
 	}
 
 	async close(): Promise<void> {

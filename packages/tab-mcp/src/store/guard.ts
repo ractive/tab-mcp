@@ -17,6 +17,15 @@ export class StoreFailure extends Error {
 	}
 }
 
+const BINDING_METHODS = [
+	"putBinding",
+	"getBinding",
+	"listBindings",
+	"renameBinding",
+	"deleteBinding",
+] as const;
+type BindingMethod = (typeof BINDING_METHODS)[number];
+
 const METHODS = [
 	"put",
 	"get",
@@ -25,7 +34,15 @@ const METHODS = [
 	"listGrants",
 	"deleteExpired",
 	"claimNonce",
+	...BINDING_METHODS,
 ] as const;
+
+/** Whether a store keeps browsers' sign-ins: all five binding methods (DEC-231). */
+export function hasBindings(
+	store: TokenStore,
+): store is TokenStore & Required<Pick<TokenStore, BindingMethod>> {
+	return BINDING_METHODS.every((m) => typeof store[m] === "function");
+}
 
 /**
  * The same store, with every failure of its methods (a rejection or a

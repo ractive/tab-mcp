@@ -16,6 +16,7 @@ import {
 	HttpJsonError,
 	JwksCache,
 	JwtError,
+	type KeySource,
 	numericDate,
 	verifyJwt,
 } from "../jwt.ts";
@@ -97,6 +98,7 @@ function originOf(url: string): string | undefined {
  */
 export class ProviderDiscovery {
 	readonly #issuer: string;
+	readonly #expectedIssuer: string;
 	readonly #development: boolean;
 	readonly #now: () => number;
 	#metadata: ProviderMetadata | undefined;
@@ -105,12 +107,21 @@ export class ProviderDiscovery {
 	#lastError: unknown;
 	#inflight: Promise<ProviderMetadata> | undefined;
 
+	/**
+	 * `issuer` is where the discovery document lives; the document must name
+	 * `expectedIssuer`, by default the same. Microsoft's multi-tenant
+	 * document (`/common/v2.0`) names a template,
+	 * `https://login.microsoftonline.com/{tenantid}/v2.0`, which each ID
+	 * token fills in with its own tenant (DEC-231).
+	 */
 	constructor(
 		issuer: string,
 		development: boolean,
 		now: () => number = Date.now,
+		expectedIssuer: string = issuer,
 	) {
 		this.#issuer = issuer;
+		this.#expectedIssuer = expectedIssuer;
 		this.#development = development;
 		this.#now = now;
 	}
@@ -161,7 +172,7 @@ export class ProviderDiscovery {
 			);
 		}
 		// OIDC Discovery §4.3: the issuer must be exactly the configured one.
-		if (doc["issuer"] !== this.#issuer) {
+		if (doc["issuer"] !== this.#expectedIssuer) {
 			throw new OidcError(
 				"discovery_issuer",
 				"the provider's metadata names another issuer",
@@ -189,7 +200,7 @@ export class ProviderDiscovery {
 				? "client_secret_post"
 				: "client_secret_basic";
 		const metadata: ProviderMetadata = {
-			issuer: this.#issuer,
+			issuer: this.#expectedIssuer,
 			authorizationEndpoint: endpoint("authorization_endpoint"),
 			tokenEndpoint: endpoint("token_endpoint"),
 			jwksUri: endpoint("jwks_uri"),
@@ -199,6 +210,106 @@ export class ProviderDiscovery {
 		this.#fetchedAt = this.#now();
 		return metadata;
 	}
+}
+
+/** What `redeemIdToken` needs: the provider, the relay's client, the flow. */
+export interface IdTokenRedemption {
+	metadata: ProviderMetadata;
+	jwks: KeySource;
+	client: { clientId: string; clientSecret?: string };
+	code: string;
+	redirectUri: string;
+	verifier: string;
+	nonce: string;
+	/**
+	 * Whether the ID token's `iss` is the provider's; by default it must be
+	 * `metadata.issuer` exactly. Microsoft's is per tenant (DEC-231).
+	 */
+	issuerMatches?: (payload: Record<string, unknown>) => boolean;
+}
+
+/**
+ * Exchange an authorization code at the token endpoint and validate the ID
+ * token (OIDC Core §3.1.3.7): signature by the provider's keys, `iss`,
+ * `aud` containing the client id, `azp` if several audiences, `exp`, `iat`
+ * and `nonce`. Returns the token's claims. Used by identity binding and by
+ * a browser's sign-in (DEC-079, DEC-231).
+ */
+export async function redeemIdToken(
+	r: IdTokenRedemption,
+): Promise<Record<string, unknown>> {
+	const { metadata, client } = r;
+	const body = new URLSearchParams({
+		grant_type: "authorization_code",
+		code: r.code,
+		redirect_uri: r.redirectUri,
+		code_verifier: r.verifier,
+	});
+	const headers: Record<string, string> = {
+		"content-type": "application/x-www-form-urlencoded",
+	};
+	const secret = client.clientSecret;
+	if (secret !== undefined && metadata.tokenAuth === "client_secret_basic") {
+		// RFC 6749 §2.3.1: both parts form-encoded before Base64.
+		const enc = (v: string) => encodeURIComponent(v).replace(/%20/g, "+");
+		headers["authorization"] =
+			`Basic ${btoa(`${enc(client.clientId)}:${enc(secret)}`)}`;
+	} else {
+		body.set("client_id", client.clientId);
+		if (secret !== undefined) body.set("client_secret", secret);
+	}
+	let response: unknown;
+	try {
+		response = await fetchJson(
+			metadata.tokenEndpoint,
+			{ method: "POST", headers, body },
+			MAX_TOKEN_RESPONSE_BYTES,
+		);
+	} catch (e) {
+		if (e instanceof HttpJsonError) {
+			throw new OidcError(`token_${e.error || e.status}`, e.message);
+		}
+		throw e;
+	}
+	const idToken = str(
+		(response as Record<string, unknown> | null)?.["id_token"],
+	);
+	if (idToken === undefined) {
+		throw new OidcError("no_id_token", "the token response has no id_token");
+	}
+	const { payload } = await verifyJwt(idToken, r.jwks);
+	const now = Date.now();
+	const issuerOk =
+		r.issuerMatches?.(payload) ?? payload["iss"] === metadata.issuer;
+	if (!issuerOk) {
+		throw new OidcError("id_token_iss", "the ID token's issuer is wrong");
+	}
+	const aud = audiences(payload);
+	if (!aud.includes(client.clientId)) {
+		throw new OidcError("id_token_aud", "the ID token is not for this relay");
+	}
+	const azp = payload["azp"];
+	if ((aud.length > 1 || azp !== undefined) && azp !== client.clientId) {
+		throw new OidcError("id_token_azp", "the ID token's azp is not this relay");
+	}
+	const exp = numericDate(payload, "exp");
+	if (exp === undefined || exp <= now - CLOCK_LEEWAY_MS) {
+		throw new OidcError("id_token_exp", "the ID token has expired");
+	}
+	const iat = numericDate(payload, "iat");
+	if (iat === undefined || iat > now + CLOCK_LEEWAY_MS) {
+		throw new OidcError(
+			"id_token_iat",
+			"the ID token's iat is missing or in the future",
+		);
+	}
+	if (payload["nonce"] !== r.nonce) {
+		throw new OidcError(
+			"id_token_nonce",
+			"the ID token's nonce does not match",
+		);
+	}
+	return payload;
 }
 
 export interface OidcPairingOptions {
@@ -448,81 +559,15 @@ export class OidcPairing implements PairingMethod {
 
 	/** Exchange the code and validate the ID token (OIDC Core §3.1.3.7); returns the subject. */
 	async #signIn(code: string, flow: Flow): Promise<string> {
-		const metadata = await this.#discovery.get();
-		const body = new URLSearchParams({
-			grant_type: "authorization_code",
+		const payload = await redeemIdToken({
+			metadata: await this.#discovery.get(),
+			jwks: this.#jwks,
+			client: this.#config,
 			code,
-			redirect_uri: this.callbackUrl,
-			code_verifier: flow.verifier,
+			redirectUri: this.callbackUrl,
+			verifier: flow.verifier,
+			nonce: flow.nonce,
 		});
-		const headers: Record<string, string> = {
-			"content-type": "application/x-www-form-urlencoded",
-		};
-		const secret = this.#config.clientSecret;
-		if (secret !== undefined && metadata.tokenAuth === "client_secret_basic") {
-			// RFC 6749 §2.3.1: both parts form-encoded before Base64.
-			const enc = (v: string) => encodeURIComponent(v).replace(/%20/g, "+");
-			headers["authorization"] =
-				`Basic ${btoa(`${enc(this.#config.clientId)}:${enc(secret)}`)}`;
-		} else {
-			body.set("client_id", this.#config.clientId);
-			if (secret !== undefined) body.set("client_secret", secret);
-		}
-		let response: unknown;
-		try {
-			response = await fetchJson(
-				metadata.tokenEndpoint,
-				{ method: "POST", headers, body },
-				MAX_TOKEN_RESPONSE_BYTES,
-			);
-		} catch (e) {
-			if (e instanceof HttpJsonError) {
-				throw new OidcError(`token_${e.error || e.status}`, e.message);
-			}
-			throw e;
-		}
-		const idToken = str(
-			(response as Record<string, unknown> | null)?.["id_token"],
-		);
-		if (idToken === undefined) {
-			throw new OidcError("no_id_token", "the token response has no id_token");
-		}
-		const { payload } = await verifyJwt(idToken, this.#jwks);
-		const now = Date.now();
-		if (payload["iss"] !== metadata.issuer) {
-			throw new OidcError("id_token_iss", "the ID token's issuer is wrong");
-		}
-		const aud = audiences(payload);
-		if (!aud.includes(this.#config.clientId)) {
-			throw new OidcError("id_token_aud", "the ID token is not for this relay");
-		}
-		const azp = payload["azp"];
-		if (
-			(aud.length > 1 || azp !== undefined) &&
-			azp !== this.#config.clientId
-		) {
-			throw new OidcError(
-				"id_token_azp",
-				"the ID token's azp is not this relay",
-			);
-		}
-		const exp = numericDate(payload, "exp");
-		if (exp === undefined || exp <= now - CLOCK_LEEWAY_MS) {
-			throw new OidcError("id_token_exp", "the ID token has expired");
-		}
-		const iat = numericDate(payload, "iat");
-		if (iat === undefined || iat > now + CLOCK_LEEWAY_MS) {
-			throw new OidcError(
-				"id_token_iat",
-				"the ID token's iat is missing or in the future",
-			);
-		}
-		if (payload["nonce"] !== flow.nonce) {
-			throw new OidcError(
-				"id_token_nonce",
-				"the ID token's nonce does not match",
-			);
-		}
 		const claim = this.#config.subjectClaim ?? "sub";
 		const subject = payload[claim];
 		if (typeof subject !== "string" || subject === "" || subject.length > 255) {

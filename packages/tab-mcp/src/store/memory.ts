@@ -1,4 +1,6 @@
 import type {
+	BindingRecord,
+	BindingSelector,
 	GrantSummary,
 	RevokeOptions,
 	RevokeSelector,
@@ -90,6 +92,8 @@ export class MemoryTokenStore implements TokenStore {
 	readonly #revokedGrants = new Map<string, number>();
 	/** Revoked addresses: address id → { at, keep until }. */
 	readonly #revokedAddresses = new Map<string, { at: number; until: number }>();
+	/** Browsers' sign-ins by address id (DEC-231). */
+	readonly #bindings = new Map<string, BindingRecord>();
 
 	async put(record: TokenRecord): Promise<boolean> {
 		if (this.#revokedGrants.has(record.grantId)) return false;
@@ -156,6 +160,9 @@ export class MemoryTokenStore implements TokenStore {
 			if (t.until <= now) this.#revokedAddresses.delete(id);
 		}
 		this.#nonces.sweep(now);
+		for (const [id, b] of this.#bindings) {
+			if (b.expiresAt <= now) this.#bindings.delete(id);
+		}
 		let n = 0;
 		for (const [hash, r] of this.#records) {
 			if (r.expiresAt <= now) {
@@ -174,7 +181,77 @@ export class MemoryTokenStore implements TokenStore {
 		return this.#nonces.claim(key, expiresAt, now);
 	}
 
+	async putBinding(
+		record: BindingRecord,
+		maxMembers: number,
+		now: number,
+	): Promise<"ok" | "full"> {
+		let others = 0;
+		for (const b of this.#bindings.values()) {
+			if (
+				b.group === record.group &&
+				b.addressId !== record.addressId &&
+				b.expiresAt > now
+			) {
+				others++;
+			}
+		}
+		if (others >= maxMembers) return "full";
+		this.#bindings.set(record.addressId, { ...record });
+		return "ok";
+	}
+
+	async getBinding(
+		addressId: string,
+		now: number,
+	): Promise<BindingRecord | undefined> {
+		const b = this.#bindings.get(addressId);
+		return b === undefined || b.expiresAt <= now ? undefined : { ...b };
+	}
+
+	async listBindings(group: string, now: number): Promise<BindingRecord[]> {
+		return [...this.#bindings.values()]
+			.filter((b) => b.group === group && b.expiresAt > now)
+			.sort(
+				(a, b) =>
+					a.createdAt - b.createdAt || a.memberId.localeCompare(b.memberId),
+			)
+			.map((b) => ({ ...b }));
+	}
+
+	async renameBinding(
+		group: string,
+		memberId: string,
+		label: string,
+		now: number,
+	): Promise<boolean> {
+		for (const b of this.#bindings.values()) {
+			if (b.group === group && b.memberId === memberId && b.expiresAt > now) {
+				b.label = label;
+				return true;
+			}
+		}
+		return false;
+	}
+
+	async deleteBinding(
+		selector: BindingSelector,
+	): Promise<BindingRecord | undefined> {
+		for (const [id, b] of this.#bindings) {
+			const match =
+				"addressId" in selector
+					? id === selector.addressId
+					: b.group === selector.group && b.memberId === selector.memberId;
+			if (match) {
+				this.#bindings.delete(id);
+				return { ...b };
+			}
+		}
+		return undefined;
+	}
+
 	async close(): Promise<void> {
+		this.#bindings.clear();
 		this.#nonces.clear();
 		this.#records.clear();
 		this.#revokedGrants.clear();

@@ -75,9 +75,9 @@ test("review of PR 65: the file records the oldest relay schema that may open it
 	expect(
 		db.query("SELECT value FROM meta WHERE key = 'min_reader_version'").get(),
 	).toEqual({ value: 6 });
-	expect(db.query("PRAGMA user_version").get()).toEqual({ user_version: 6 });
-	// A later release marks the file as needing schema 7.
-	db.run("UPDATE meta SET value = 7 WHERE key = 'min_reader_version'");
+	expect(db.query("PRAGMA user_version").get()).toEqual({ user_version: 7 });
+	// A later release marks the file as needing schema 8.
+	db.run("UPDATE meta SET value = 8 WHERE key = 'min_reader_version'");
 	db.close();
 	expect(() => new SqliteTokenStore(path)).toThrow(/needs a newer relay/);
 	// Opening never lowers it.
@@ -86,7 +86,7 @@ test("review of PR 65: the file records the oldest relay schema that may open it
 		again
 			.query("SELECT value FROM meta WHERE key = 'min_reader_version'")
 			.get(),
-	).toEqual({ value: 7 });
+	).toEqual({ value: 8 });
 	again.close();
 });
 
@@ -156,7 +156,7 @@ test("a schema 5 file opens and gains the app column; its tokens go, as they wer
 			(c) => c.name,
 		),
 	).toContain("app");
-	expect(db.query("PRAGMA user_version").get()).toEqual({ user_version: 6 });
+	expect(db.query("PRAGMA user_version").get()).toEqual({ user_version: 7 });
 	// A relay of schema 5 would drop the column on write: it must refuse the file.
 	expect(
 		db.query("SELECT value FROM meta WHERE key = 'min_reader_version'").get(),
@@ -245,4 +245,55 @@ test("a version 2 SQLite file gains the subject, client_auth and app columns; it
 	expect(await store.claimNonce("n", 2000, 1000)).toBe(true);
 	expect(await store.claimNonce("n", 2000, 1001)).toBe(false);
 	await store.close();
+});
+
+test("DEC-231: a schema 6 file opens at 7 with a bindings table; its tokens stay as they were, and older relays may still open it", async () => {
+	const path = join(dir, "v6.db");
+	const record = {
+		hash: "h6",
+		kind: "refresh" as const,
+		grantId: "g6",
+		addressId: "a6",
+		app: "my-app",
+		clientId: "c",
+		clientName: "C",
+		scopes: ["tools"],
+		grantCreatedAt: 1,
+		issuedAt: 1,
+		expiresAt: 9_999_999_999_999,
+		usedAt: 5,
+	};
+	const v6 = new SqliteTokenStore(path);
+	await v6.put(record);
+	await v6.close();
+	// As a relay of schema 6 left it: no bindings table, user_version 6.
+	const old = new Database(path, { strict: true });
+	old.run("DROP TABLE bindings");
+	old.run("PRAGMA user_version = 6");
+	old.close();
+
+	const store = new SqliteTokenStore(path);
+	// Untouched, the used refresh token's expiry too (the step to 4 is not run again).
+	expect(await store.get("h6")).toEqual(record);
+	const binding = {
+		addressId: "a6",
+		group: "grp",
+		memberId: "m_1",
+		provider: "github",
+		app: "my-app",
+		label: "Chrome on macOS",
+		createdAt: 10,
+		expiresAt: 9_999_999_999_999,
+	};
+	expect(await store.putBinding(binding, 16, 10)).toBe("ok");
+	await store.close();
+	const db = new Database(path, { strict: true });
+	expect(db.query("PRAGMA user_version").get()).toEqual({ user_version: 7 });
+	expect(
+		db.query("SELECT value FROM meta WHERE key = 'min_reader_version'").get(),
+	).toEqual({ value: 6 });
+	db.close();
+	const again = new SqliteTokenStore(path);
+	expect(await again.getBinding("a6", 10)).toEqual(binding);
+	await again.close();
 });

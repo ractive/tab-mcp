@@ -83,6 +83,35 @@ export interface RevokeOptions {
 	keepUntil: number;
 }
 
+/**
+ * A browser's sign-in (DEC-231): the address id of a signed-in browser
+ * (its extension's page) bound to an account. Every binding with the same
+ * `group` is a member of that account's group.
+ */
+export interface BindingRecord {
+	/** The browser's address id; one binding per address. */
+	addressId: string;
+	/** A hash of the provider and the account's stable id, never the account itself. */
+	group: string;
+	/** The member's id as the group sees it; it does not reveal the address id. */
+	memberId: string;
+	/** The provider signed in with (`google`, `microsoft`, `github`). */
+	provider: string;
+	/** The app of the address (the extension's app id). */
+	app: string;
+	/** The member's name in the group ("Chrome on macOS"), renamable by any member. */
+	label: string;
+	/** When the browser signed in. */
+	createdAt: number;
+	/** When the binding ends without a new sign-in (90 days after it). */
+	expiresAt: number;
+}
+
+/** One binding, by its address or by its member id in a group. */
+export type BindingSelector =
+	| { addressId: string }
+	| { group: string; memberId: string };
+
 export interface TokenStore {
 	/**
 	 * Insert or replace a token record. Returns `false`, and stores nothing,
@@ -114,7 +143,11 @@ export interface TokenStore {
 	 * first.
 	 */
 	listGrants(addressId: string, now: number): Promise<GrantSummary[]>;
-	/** Delete every record with `expiresAt <= now` and tombstones past `keepUntil`. Returns how many records. */
+	/**
+	 * Delete every record with `expiresAt <= now` and tombstones past
+	 * `keepUntil` (and expired bindings, where the store has them). Returns
+	 * how many token records.
+	 */
 	deleteExpired(now: number): Promise<number>;
 	/**
 	 * Optional (DEC-106): remember a one-time value (the hash of a client
@@ -125,6 +158,40 @@ export interface TokenStore {
 	 * relay remembers them in its own memory, which is per instance.
 	 */
 	claimNonce?(key: string, expiresAt: number, now: number): Promise<boolean>;
+	/**
+	 * Optional, all five or none (DEC-231): the bindings of signed-in
+	 * browsers. A relay that lets browsers sign in (`signIn`) refuses to start
+	 * with a store that lacks them. Bindings with `expiresAt <= now` count as
+	 * absent everywhere; `deleteExpired` should drop them.
+	 *
+	 * `putBinding` inserts the binding of `record.addressId`, or replaces it
+	 * (a browser that signs in again, also with another account). It returns
+	 * `"full"`, and stores nothing, when the group already has `maxMembers`
+	 * live bindings of other addresses. Counting and inserting must be atomic,
+	 * so two browsers signing in at once cannot both take the last place.
+	 * `memberId` is unique across groups.
+	 */
+	putBinding?(
+		record: BindingRecord,
+		maxMembers: number,
+		now: number,
+	): Promise<"ok" | "full">;
+	/** The live binding of an address, or `undefined`. */
+	getBinding?(
+		addressId: string,
+		now: number,
+	): Promise<BindingRecord | undefined>;
+	/** The live bindings of a group, oldest first. */
+	listBindings?(group: string, now: number): Promise<BindingRecord[]>;
+	/** Rename a live member of a group; `false` if there is none. */
+	renameBinding?(
+		group: string,
+		memberId: string,
+		label: string,
+		now: number,
+	): Promise<boolean>;
+	/** Delete one binding; returns it (live or not), or `undefined` if there was none. */
+	deleteBinding?(selector: BindingSelector): Promise<BindingRecord | undefined>;
 	/** Release resources (database handles). Optional. */
 	close?(): Promise<void>;
 }

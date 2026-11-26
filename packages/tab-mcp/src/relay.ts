@@ -47,7 +47,9 @@ import {
 	SUBPROTOCOL,
 } from "./protocol.ts";
 import { clientHost, STORE_UNAVAILABLE_TEXT, TabSession } from "./session.ts";
-import { guardStore } from "./store/guard.ts";
+import { BrowserSignIn } from "./signin/browser.ts";
+import type { SignInEndpoints } from "./signin/providers.ts";
+import { guardStore, hasBindings } from "./store/guard.ts";
 import { MemoryTokenStore } from "./store/memory.ts";
 import { SqliteTokenStore } from "./store/sqlite.ts";
 import type { TokenRecord, TokenStore } from "./store/types.ts";
@@ -190,6 +192,10 @@ export interface RelayTestHooks extends AuthorizationTestMode {
 	assertionKeys?: KeySource;
 	/** A smaller relay-wide replay cache for tab assertions. */
 	maxSeenAssertions?: number;
+	/** Loopback fakes of the sign-in providers (DEC-231). */
+	signInEndpoints?: SignInEndpoints;
+	/** A shorter life of a browser's sign-in than 90 days. */
+	bindingLifetimeMs?: number;
 }
 
 interface Body {
@@ -495,11 +501,40 @@ function startRelay(
 		}
 	}
 
+	/** Browsers' sign-in and their groups (DEC-231), when configured. */
+	let signIn: BrowserSignIn | undefined;
+	if (config.signIn !== undefined) {
+		if (!hasBindings(store)) {
+			if (ownsStore) void store.close?.();
+			throw new Error(
+				"browser sign-in (TAB_MCP_SIGN_IN_APPS) needs a token store with bindings (putBinding, getBinding, listBindings, renameBinding, deleteBinding)",
+			);
+		}
+		signIn = new BrowserSignIn(
+			{
+				config,
+				logger,
+				store,
+				publicUrl: () => publicUrl,
+				sessionOf: (addressId) => readySession(addressId),
+			},
+			{
+				...(hooks?.signInEndpoints === undefined
+					? {}
+					: { endpoints: hooks.signInEndpoints }),
+				...(hooks?.bindingLifetimeMs === undefined
+					? {}
+					: { bindingLifetimeMs: hooks.bindingLifetimeMs }),
+			},
+		);
+	}
+
 	const host = {
 		config,
 		logger,
 		store,
 		codes,
+		...(signIn === undefined ? {} : { signIn }),
 		...(hooks?.pairingCodeTtlMs === undefined
 			? {}
 			: { pairingCodeTtlMs: hooks.pairingCodeTtlMs }),
@@ -1672,7 +1707,19 @@ function startRelay(
 				POST: (req, srv) => auth.authorizeSubmit(req, ipOf(req, srv)),
 			},
 			"/authorize/callback": {
-				GET: (req, srv) => auth.authorizeCallback(req, ipOf(req, srv)),
+				// One callback for every flow: a browser's sign-in has a `state`
+				// of its own form (DEC-231); everything else is identity binding's.
+				GET: (req, srv) =>
+					signIn !== undefined &&
+					BrowserSignIn.owns(new URL(req.url).searchParams.get("state"))
+						? signIn.callback(req, ipOf(req, srv))
+						: auth.authorizeCallback(req, ipOf(req, srv)),
+			},
+			"/signin": {
+				GET: (req, srv) =>
+					signIn === undefined
+						? new Response("Not found", { status: 404 })
+						: signIn.visit(req, ipOf(req, srv)),
 			},
 			"/authorize.css": { GET: () => auth.stylesheet() },
 			"/token": {
@@ -1751,6 +1798,7 @@ function startRelay(
 	let sweepingGrants = false;
 	const sweep = setInterval(() => {
 		auth.sweep();
+		signIn?.sweep(Date.now());
 		sweepRevocations(Date.now());
 		// The figures to size TAB_MCP_MAX_SESSIONS by before refusals start
 		// (RQ 6), every sweep (10 minutes by default).
@@ -1759,6 +1807,7 @@ function startRelay(
 			maxSessions: config.maxSessions,
 			waitingRequests: waitingCount,
 			pendingAuthorizations: auth.pendingCount,
+			...(signIn === undefined ? {} : { signIns: signIn.flowCount }),
 		});
 		// Inside a promise chain, so a store that throws synchronously is a
 		// logged failure, not an uncaught exception in the timer (RQ 10).

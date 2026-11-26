@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import type { TokenRecord, TokenStore } from "./types.ts";
+import { hasBindings } from "./guard.ts";
+import type { BindingRecord, TokenRecord, TokenStore } from "./types.ts";
 
 /**
  * The conformance suite every `TokenStore` must pass (DEC-041). Call it from a
@@ -133,6 +134,131 @@ export function tokenStoreConformance(
 				Array.from({ length: 10 }, () => claim("race", now + 1000, now)),
 			);
 			expect(results.filter(Boolean)).toHaveLength(1);
+		});
+
+		const binding = (over: Partial<BindingRecord> = {}): BindingRecord => {
+			seq++;
+			return {
+				addressId: `addr-${seq}`,
+				group: "group-a",
+				memberId: `m_${seq}`,
+				provider: "google",
+				app: "app-a",
+				label: "Chrome on macOS",
+				createdAt: now + seq,
+				expiresAt: now + 86_400_000,
+				...over,
+			};
+		};
+
+		test("bindings, if implemented: all five methods or none (DEC-231)", () => {
+			const methods = [
+				store.putBinding,
+				store.getBinding,
+				store.listBindings,
+				store.renameBinding,
+				store.deleteBinding,
+			].filter((m) => m !== undefined);
+			expect([0, 5]).toContain(methods.length);
+		});
+
+		test("bindings, if implemented: put, get, list oldest first, replace by address", async () => {
+			if (!hasBindings(store)) return;
+			const a = binding();
+			const b = binding();
+			const other = binding({ group: "group-b" });
+			for (const r of [b, a, other]) {
+				expect(await store.putBinding(r, 16, now)).toBe("ok");
+			}
+			expect(await store.getBinding(a.addressId, now)).toEqual(a);
+			expect(await store.getBinding("nope", now)).toBeUndefined();
+			expect(await store.listBindings("group-a", now)).toEqual([a, b]);
+			// The same address signs in again, here with another account.
+			const moved = {
+				...a,
+				group: "group-b",
+				label: "Work",
+				createdAt: now + 99,
+			};
+			expect(await store.putBinding(moved, 16, now)).toBe("ok");
+			expect(await store.listBindings("group-a", now)).toEqual([b]);
+			expect(await store.listBindings("group-b", now)).toEqual([other, moved]);
+		});
+
+		test("bindings, if implemented: a full group refuses another address, not one of its own", async () => {
+			if (!hasBindings(store)) return;
+			const first = binding();
+			const second = binding();
+			expect(await store.putBinding(first, 2, now)).toBe("ok");
+			expect(await store.putBinding(second, 2, now)).toBe("ok");
+			const third = binding();
+			expect(await store.putBinding(third, 2, now)).toBe("full");
+			expect(await store.getBinding(third.addressId, now)).toBeUndefined();
+			// A member signing in again takes no new place.
+			expect(
+				await store.putBinding({ ...first, expiresAt: now + 5000 }, 2, now),
+			).toBe("ok");
+			// An expired member counts for nothing.
+			expect(
+				await store.putBinding({ ...second, expiresAt: now - 1 }, 2, now),
+			).toBe("ok");
+			expect(await store.putBinding(third, 2, now)).toBe("ok");
+		});
+
+		test("bindings, if implemented: of concurrent sign-ins for the last place exactly one wins", async () => {
+			if (!hasBindings(store)) return;
+			const put = store.putBinding.bind(store);
+			const results = await Promise.all(
+				Array.from({ length: 8 }, () => put(binding(), 1, now)),
+			);
+			expect(results.filter((r) => r === "ok")).toHaveLength(1);
+		});
+
+		test("bindings, if implemented: expired ones are absent everywhere, and deleteExpired drops them", async () => {
+			if (!hasBindings(store)) return;
+			const r = binding({ expiresAt: now + 10 });
+			await store.putBinding(r, 16, now);
+			expect(await store.getBinding(r.addressId, now + 10)).toBeUndefined();
+			expect(await store.listBindings(r.group, now + 10)).toEqual([]);
+			expect(
+				await store.renameBinding(r.group, r.memberId, "x", now + 10),
+			).toBe(false);
+			await store.deleteExpired(now + 10);
+			expect(await store.getBinding(r.addressId, now)).toBeUndefined();
+		});
+
+		test("bindings, if implemented: rename and delete by member id within its group only", async () => {
+			if (!hasBindings(store)) return;
+			const r = binding();
+			await store.putBinding(r, 16, now);
+			expect(await store.renameBinding("group-b", r.memberId, "x", now)).toBe(
+				false,
+			);
+			expect(await store.renameBinding(r.group, r.memberId, "Work", now)).toBe(
+				true,
+			);
+			expect((await store.getBinding(r.addressId, now))?.label).toBe("Work");
+			expect(
+				await store.deleteBinding({ group: "group-b", memberId: r.memberId }),
+			).toBeUndefined();
+			expect(
+				await store.deleteBinding({ group: r.group, memberId: r.memberId }),
+			).toEqual({ ...r, label: "Work" });
+			expect(await store.getBinding(r.addressId, now)).toBeUndefined();
+			const s = binding();
+			await store.putBinding(s, 16, now);
+			expect(await store.deleteBinding({ addressId: s.addressId })).toEqual(s);
+			expect(
+				await store.deleteBinding({ addressId: s.addressId }),
+			).toBeUndefined();
+		});
+
+		test("bindings, if implemented: revoking an address's grants leaves its binding", async () => {
+			if (!hasBindings(store)) return;
+			const r = binding({ addressId: "addr-a" });
+			await store.putBinding(r, 16, now);
+			await store.revoke({ addressId: "addr-a" }, until);
+			expect(await store.getBinding("addr-a", now)).toEqual(r);
 		});
 
 		test("markUsed succeeds once, then fails", async () => {
