@@ -202,7 +202,14 @@ session's sign-in messages one after another, in the order they came. They count
    `nonce` for OpenID Connect. The `state` of a browser's sign-in starts with
    `browser.` and names the provider; on the one callback
    `https://<relay>/authorize/callback` the relay tells its sign-ins from identity
-   binding's by it.
+   binding's by it. Opened from another network than the session's (the relay's
+   network key of the address, an IPv6 /56), the URL first shows a page of the relay:
+   it names the browser's `label` and the app, says "Only continue if you started this
+   yourself in the tab-mcp panel of that browser." and warns never to paste or send the
+   address one lands on afterwards to anyone. Its Continue (a form post with the page's
+   single-use token and the sign-in's cookie) goes on to the provider; Cancel ends the
+   sign-in and sends the browser to `redirectUrl?signin_error=cancelled`. Opened from the
+   same network, the URL goes straight to the provider.
 3. The provider sends the browser back. The relay checks the cookie (without it: an
    error page, and no redirect), redeems the code and checks the account: the ID token
    as for identity binding (signature, `iss`, `aud`, `azp`, `exp`, `iat`, `nonce`;
@@ -215,17 +222,22 @@ session's sign-in messages one after another, in the order they came. They count
    sends `redirectUrl?signin_error=<reason>` instead: `provider_error` (the provider
    sent no code: cancelled, refused), `unchecked` (the code or the account did not
    check out), `session_gone` (the session that started the sign-in is gone, or another
-   session of its address replaced it; nothing is redeemed then). Either URL ends
-   `launchWebAuthFlow`.
+   session of its address replaced it; nothing is redeemed then), `cancelled` (Cancel
+   on the relay's page). Either URL ends `launchWebAuthFlow`.
 5. The extension sends `signin.complete` with the code. The relay binds the session's
    address id to the account and sends `signin.done` and `group`.
 
 The redirect URLs (`*.chromiumapp.org`, `*.extensions.allizom.org`) are never loaded:
 the browser hands such a URL to the `launchWebAuthFlow` of the extension that started
 it, and only that extension sees the code. So someone who gets another person to open
-their sign-in link and finish it gets nothing: the code stays in that person's address
-bar, the stranger's session is never told, nothing is bound, and the display name never
-leaves the relay. The relay's URL and the callback each work once.
+their sign-in link and finish it gets nothing unless that person also hands them the
+code: it stays in that person's address bar, the stranger's session is never told,
+nothing is bound, and the display name never leaves the relay. Whoever has the code and
+holds the session that started the sign-in can complete it within its 2 minutes: then
+their browser joins the person's group. That is why the relay's page warns where the
+link was opened from another network. The relay's URL and the callback each work once.
+A session's sign-in that nobody opened yet ends with the session; at most 3 such are
+open per network.
 
 **The account and the group.** The relay keeps a hash of the provider and the account's
 stable id, never the id itself, the e-mail address or the name: Google `iss` and `sub`,
@@ -530,7 +542,7 @@ WebSocket protocol pings, so proxies keep the connection open.
 | Session lifetime | 12 h | relay (close 4001) |
 | Sessions per IP / in total | 5 / 500 | relay (HTTP 429 on upgrade) |
 | Sign-in starts per session / per network | 5, then 1 every 30 s / 20, then 1 every 30 s | relay (`signin.failed` `rate_limited`) |
-| Open sign-ins | 1 per session, 10 000 in all, 10 minutes each | relay (`signin.failed` `busy`) |
+| Open sign-ins | 1 per session, 3 not yet opened per network, 10 000 in all, 10 minutes each | relay (`signin.failed` `rate_limited`, `busy`) |
 | Members per group | 16 | relay (`signin.failed` `group_full`) |
 
 All are configurable on the relay; see [configuration](configuration.md). The

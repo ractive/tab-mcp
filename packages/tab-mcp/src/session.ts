@@ -495,7 +495,7 @@ export class TabSession {
 				// Parsed as such only while `signInOffered` (`parseTabMessage`).
 				const signIn = this.#host.signIn;
 				if (signIn === undefined) return;
-				await this.serialSignIn(() =>
+				await this.#serialSignIn(() =>
 					msg.type === "signin.start"
 						? signIn.start(this, msg.provider, msg.redirectUrl, msg.label)
 						: msg.type === "signin.complete"
@@ -698,15 +698,25 @@ export class TabSession {
 			...(this.signInOffered ? { signIn: true } : {}),
 		});
 		this.#host.ready(this);
-		if (this.signInOffered) signIn?.connected(this);
+		if (signIn !== undefined && this.signInOffered) {
+			this.#serialSignIn(() => signIn.connected(this)).catch(
+				(error: unknown) => {
+					this.#host.logger.error("tab.handler_error", {
+						session: this.sessionId,
+						type: "signin.connected",
+						...errorFields(error),
+					});
+				},
+			);
+		}
 	}
 
 	/**
-	 * Sign-in work of this session, one step after another in the order it
-	 * came (its messages, and a sign-in that comes back), as identity
-	 * messages are (DEC-231).
+	 * This session's sign-in work, one step after another in the order it
+	 * came: its `signin.*` and `member.*` messages, and the check of its
+	 * binding when it connects (DEC-231), as identity messages are.
 	 */
-	serialSignIn<T>(run: () => Promise<T>): Promise<T> {
+	#serialSignIn<T>(run: () => Promise<T>): Promise<T> {
 		const next = this.#signInChain.then(run);
 		this.#signInChain = next.catch(() => {});
 		return next;

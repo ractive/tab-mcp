@@ -580,8 +580,14 @@ gets any of it.
   extension hands back the completion code of the redirect URL (`signin.complete`, 2
   minutes, once, that session only); the redirect URL is never loaded, only the
   extension's `launchWebAuthFlow` sees it. A user who finishes someone else's link
-  therefore binds nothing and tells that session nothing, their display name included
-  (DEC-231).
+  therefore binds nothing and tells that session nothing, their display name included,
+  unless they also hand over the address they land on (ConsentFix): then the stranger's
+  session can complete it within 2 minutes and join the user's group. A link opened from
+  another network than the session's first shows a relay page that names the browser
+  and the app, says "Only continue if you started this yourself in the tab-mcp panel of
+  that browser." and warns never to send that address; Continue is a form post with a
+  single-use token and the cookie. No page on the same network (review of PR 257,
+  DEC-231).
 - A member sees labels, member ids, sign-in times and who is online, never address ids,
   tabs or display names; any member can rename or remove any other.
 - The store keeps an unkeyed SHA-256 of prefix, provider and stable id (the relay has no
@@ -733,9 +739,10 @@ is A15 in `docs/threat-model.md` (DEC-122 to DEC-126, DEC-164 to DEC-167).
   page wrote them (cut, prefixed, marked); a read-only claim is the page's (A13).
 - The known Claude header bug tolerance (decision log) slightly widens what the relay
   accepts; it is limited to one exact version pair.
-- Browser sign-in (A16): a taken-over provider account adds a browser to the group;
-  members can rename and remove each other; a store copy reveals which public GitHub
-  accounts signed in.
+- Browser sign-in (A16): a taken-over provider account adds a browser to the group, and
+  so does a stranger whose link a user finishes and who gets the address the user lands
+  on (warned against on another network, not on the same one); members can rename and
+  remove each other; a store copy reveals which public GitHub accounts signed in.
 
 # Citations
 

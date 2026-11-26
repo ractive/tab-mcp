@@ -496,7 +496,9 @@ attacks.
   from many networks with one request each pushes requests out in the order they came
   (A1).
 - **Browser sign-ins** (A16): 5 starts per session and 20 per network, then one every
-  30 s each; one open sign-in per session and 10 000 in all, each 10 minutes; views of
+  30 s each; one open sign-in per session, 3 not yet opened per network (one that
+  nobody opened ends with its session, so filling the 10 000 in all takes opening each
+  link), each 10 minutes; views of
   the sign-in URL and its callback per network, 60, then one a second; 16 members per
   group.
 - **Control messages from a tab** (everything but `pong` and the `http.response*`
@@ -1115,7 +1117,8 @@ reaches.
 - **Someone else's sign-in link.** The relay's URL from `signin.url` works once, for
   10 minutes, and belongs to the session that asked for it. Someone who gets a user to
   open their link (sent as "sign in to tab-mcp") and to finish the provider's sign-in
-  gets nothing from it: the relay binds only when the extension hands back the
+  gets nothing from it unless the user also hands them the code: the relay binds only
+  when the extension hands back the
   completion code of the redirect URL (`signin.complete`), and that URL
   (`*.chromiumapp.org`, `*.extensions.allizom.org`) is never loaded by a browser; only
   the `launchWebAuthFlow` that the extension started sees it. In the user's browser the
@@ -1124,9 +1127,22 @@ reaches.
   A code works once, for 2 minutes, and only for the session whose sign-in made it.
   Besides, a link that someone else has already opened is refused, and a sign-in that
   comes back in another browser than the one that opened the link (its cookie missing)
-  ends on an error page. Left over: someone who can read the user's address bar, or who
-  gets them to paste the code, and who holds the session the link was made for, can
-  still complete it within the 2 minutes.
+  ends on an error page.
+  The stranger's way in is then to get the user to send them the address they land on
+  (the pattern known as ConsentFix): with the code, the stranger's session (a script
+  that claims an extension's origin can be one) completes the sign-in, and the
+  stranger's browser joins the user's group, sees the user's display name and the
+  members, and can rename and remove them. Against it, a link opened from another
+  network than the session's (the relay's network key: an IPv4 address, an IPv6 /56)
+  first shows a page of the relay that names the browser's label and the app, says
+  "Only continue if you started this yourself in the tab-mcp panel of that browser." and
+  warns never to paste or send the address one lands on to anyone. Only its Continue,
+  a form post with the page's single-use token and the sign-in's cookie, goes on to the
+  provider; a link alone does not get past it. The relay logs whether the link and the
+  callback came from the session's network. Left over, plainly: a user who reads past
+  the page and sends the code within its 2 minutes lets the stranger in; a stranger on
+  the user's own network (the same office, the same household's address) gets no page
+  at all; and the network check says nothing about who is behind it.
 - **Mix-up and replay.** Each flow has its own `state` (with the provider in it, so the
   callback knows which provider's code it is), PKCE S256 and, for OpenID Connect, a
   `nonce`; the code is redeemed at the provider the flow started with, and the ID token
@@ -1154,7 +1170,9 @@ reaches.
   times and who is online; never another member's address id, tabs, grants or display
   name. Member ids are random. Any member can rename or remove any other: one member can
   annoy the others (rename them, sign them out), which the group sees. No member can do
-  more to another than end its sign-in.
+  more to another than end its sign-in. A rename or removal is checked against the
+  sender's own binding in the store first, so a browser that was removed meanwhile can
+  no longer act; a browser removed while it connects is told once it is connected.
 - **What the relay keeps.** A hash (SHA-256) of a fixed prefix, the provider and the
   account's stable id, not keyed with a relay secret (the relay has none). A copy of the
   store can therefore be checked against a guessed account: GitHub's user ids are public,
@@ -1164,7 +1182,8 @@ reaches.
 - **Lifetime.** A sign-in lasts 90 days from the sign-in (as a grant, DEC-062), then the
   browser must sign in again; signing out or being removed ends it at once.
 - **Limits.** Sign-in starts per session (5, then one every 30 s) and per network (20,
-  then one every 30 s), one open sign-in per session, 10 000 in all, page views of the
+  then one every 30 s), one open sign-in per session, 3 not yet opened per network
+  (one that nobody opened ends with its session), 10 000 in all, page views of the
   relay's sign-in URL and its callback per network (60, then one a second), 16 members
   per group, and the control budget of every session (A8).
 - **Older extensions are not affected.** A session that does not ask for sign-in in its
@@ -1252,8 +1271,11 @@ each default.
   a web app that vouches for the wrong user (A12).
 - With browser sign-in: a taken-over account at Google, Microsoft or GitHub puts a
   browser of its own into the account's group. Every member sees the new member and can
-  remove it; any member can also rename or remove the others. A copy of the store tells which public GitHub
-  accounts signed in (A16).
+  remove it; any member can also rename or remove the others. So does a stranger whose
+  sign-in link a user finishes and who then gets the address the user landed on within
+  2 minutes; the relay's page warns where the link was opened from another network,
+  not from the same one. A copy of the store tells which public GitHub accounts signed
+  in (A16).
 - With the tab-mcp browser extension: a tool that runs without asking (marked read-only by the page,
   or with its "Always allow" switch on for its site) does whatever the AI app asks of it, and another program on
   the computer can click a notification or the side panel (A13).

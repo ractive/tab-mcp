@@ -22,6 +22,7 @@
  */
 
 import { shortAddress } from "../address.ts";
+import { readBodyWithDeadline } from "../body.ts";
 import type { RelayConfig, SignInProviderId } from "../config.ts";
 import { signInAllowed } from "../config.ts";
 import { constantTimeEqual, randomBase64url } from "../crypto.ts";
@@ -56,6 +57,13 @@ export const BINDING_LIFETIME_MS: number = 90 * 86_400_000;
 const FLOW_TTL_MS = 10 * 60_000;
 /** Open sign-ins on the relay; one per session at most. */
 const MAX_FLOWS = 10_000;
+/**
+ * Flows whose link nobody opened yet, per network (`networkKey`): one
+ * browser needs one; a few allow several profiles behind one address.
+ */
+const MAX_UNVISITED_PER_NETWORK = 3;
+/** The interstitial's form body is two short fields. */
+const MAX_FORM_BYTES = 1024;
 /** How long the extension has to hand back the completion code. */
 const COMPLETION_TTL_MS = 2 * 60_000;
 /** The `state` of a browser's sign-in starts with this (an AI app's has none). */
@@ -106,13 +114,23 @@ interface Flow {
 	provider: SignInProvider;
 	/** The provider's authorization URL, made at the start. */
 	authorizationUrl: string;
-	session: TabSession;
+	/** The session that started it; `undefined` once that session ended. */
+	session: TabSession | undefined;
 	addressId: string;
+	/** The app the interstitial names: the site's name, else the app id. */
+	appName: string;
+	/** The network of the session that started it (`networkKey`). */
+	network: string;
 	redirectUrl: string;
 	label: string;
 	expiresAt: number;
-	/** The cookie set when the browser opened the relay's URL. */
+	/** The cookie set when the browser opened the relay's URL (the flow is visited). */
 	cookie?: string;
+	/**
+	 * The interstitial's single-use token, while it waits for Continue: the
+	 * link was opened from another network than the session's.
+	 */
+	proceed?: string;
 }
 
 /** A checked sign-in that waits for its extension's `signin.complete`. */
@@ -183,6 +201,8 @@ export class BrowserSignIn {
 	readonly #flowOf = new Map<TabSession, string>();
 	/** Completion code → checked sign-in; insertion order is expiry order. */
 	readonly #completions = new Map<string, Completion>();
+	/** Open flows whose link was not opened yet, per network. */
+	readonly #unvisited = new Map<string, number>();
 	/** The members' sessions that are online, per group. */
 	readonly #online = new Map<string, Set<TabSession>>();
 	/** Sign-ins a session may start: 5, then one every 30 s. */
@@ -260,24 +280,74 @@ export class BrowserSignIn {
 		}
 	}
 
-	/** After `session` was sent: the member is online; its group hears of it. */
-	connected(session: TabSession): void {
+	/**
+	 * After `session` was sent: the member is online; its group hears of it.
+	 * The binding is read once more first: a member may have removed this
+	 * browser while its `hello` was being answered (the read in `attach` may
+	 * have come before the removal). Removed meanwhile, it is told so.
+	 */
+	async connected(session: TabSession): Promise<void> {
 		const member = session.member;
-		if (member === undefined) return;
+		const addressId = session.addressId;
+		if (member === undefined || addressId === undefined) return;
+		let live: BindingRecord | undefined;
+		try {
+			live = await this.#host.store.getBinding(addressId, Date.now());
+		} catch (error) {
+			this.#host.logger.error("store.error", {
+				op: "getBinding",
+				...errorFields(error),
+			});
+			return; // unknown: not counted online until it connects again
+		}
+		if (!session.ready || session.member !== member) return;
+		if (!sameMember(live, member)) {
+			this.#end(session, "removed");
+			return;
+		}
 		this.#join(session, member.group);
 		void this.#announce(member.group);
 	}
 
 	/**
-	 * The session ended: its group sees it offline. Its open flow stays until
-	 * it expires, so a sign-in that comes back for it goes back to the
-	 * extension as failed (and binds nothing) instead of ending on an error
-	 * page in the sign-in window.
+	 * The session ended: its group sees it offline. Its flow goes if nobody
+	 * opened the link yet; an opened one stays until it expires, without the
+	 * session, so a sign-in that comes back for it goes back to the extension
+	 * as failed (and binds nothing) instead of ending on an error page in the
+	 * sign-in window. Its completion codes go.
 	 */
 	released(session: TabSession): void {
+		const state = this.#flowOf.get(session);
+		this.#flowOf.delete(session);
+		const flow = state === undefined ? undefined : this.#flows.get(state);
+		if (flow !== undefined) {
+			if (flow.cookie === undefined) this.#dropFlow(flow.state);
+			else flow.session = undefined;
+		}
+		for (const [code, completion] of this.#completions) {
+			if (completion.flow.session === session) this.#completions.delete(code);
+		}
 		const group = session.member?.group;
 		if (group === undefined) return;
 		if (this.#leave(session, group)) void this.#announce(group);
+	}
+
+	/**
+	 * Whether a session's own binding in the store is still the one it holds:
+	 * rename and remove act only for a browser that is still the member it
+	 * thinks it is. A stale one is told it was removed.
+	 */
+	async #stillMember(
+		session: TabSession,
+		member: Membership,
+	): Promise<boolean> {
+		const live = await this.#host.store.getBinding(
+			session.addressId ?? "",
+			Date.now(),
+		);
+		if (sameMember(live, member)) return true;
+		if (session.member === member) this.#end(session, "removed");
+		return false;
 	}
 
 	#join(session: TabSession, group: string): void {
@@ -353,15 +423,22 @@ export class BrowserSignIn {
 		if (!redirectUrlFits(redirectUrl, session.origin)) {
 			return failed("bad_redirect");
 		}
+		const network = networkKey(session.ip);
 		if (
 			!this.#startsPerSession.take(session.sessionId) ||
-			!this.#startsPerNetwork.take(networkKey(session.ip))
+			!this.#startsPerNetwork.take(network)
 		) {
 			return failed("rate_limited");
 		}
 		this.#sweep(Date.now());
 		const previous = this.#flowOf.get(session);
 		if (previous !== undefined) this.#dropFlow(previous);
+		// Flows nobody opened yet, per network: filling the relay's flows
+		// takes opening each link, not only asking for it.
+		if ((this.#unvisited.get(network) ?? 0) >= MAX_UNVISITED_PER_NETWORK) {
+			this.#limited("signin_unvisited", network);
+			return failed("rate_limited");
+		}
 		if (this.#flows.size >= MAX_FLOWS) return failed("busy");
 		const flow: Flow = {
 			state: `${STATE_PREFIX}${provider.id}.${randomBase64url(24)}`,
@@ -372,6 +449,8 @@ export class BrowserSignIn {
 			authorizationUrl: "",
 			session,
 			addressId,
+			appName: session.appName ?? session.app ?? "",
+			network,
 			redirectUrl,
 			label: cleanLabel(label) ?? DEFAULT_LABEL,
 			expiresAt: Date.now() + FLOW_TTL_MS,
@@ -388,9 +467,12 @@ export class BrowserSignIn {
 			return failed("provider_unavailable");
 		}
 		if (!session.ready) return;
+		const replaced = this.#flowOf.get(session);
+		if (replaced !== undefined) this.#dropFlow(replaced);
 		this.#flows.set(flow.state, flow);
 		this.#starts.set(flow.start, flow.state);
 		this.#flowOf.set(session, flow.state);
+		this.#unvisited.set(network, (this.#unvisited.get(network) ?? 0) + 1);
 		this.#host.logger.info("signin.started", {
 			address: shortAddress(addressId),
 			provider: provider.id,
@@ -448,6 +530,10 @@ export class BrowserSignIn {
 		}
 		let renamed: boolean;
 		try {
+			if (!(await this.#stillMember(session, member))) {
+				session.refused("unknown_id", "this browser is not signed in", about);
+				return;
+			}
 			renamed = await this.#host.store.renameBinding(
 				member.group,
 				memberId,
@@ -491,6 +577,10 @@ export class BrowserSignIn {
 		}
 		let removed: BindingRecord | undefined;
 		try {
+			if (!(await this.#stillMember(session, member))) {
+				session.refused("unknown_id", "this browser is not signed in", about);
+				return;
+			}
 			removed = await this.#host.store.deleteBinding({
 				group: member.group,
 				memberId,
@@ -558,10 +648,14 @@ export class BrowserSignIn {
 
 	/**
 	 * GET `/signin?flow=`: the URL the extension opened. Once only: it sets
-	 * the flow's cookie and sends the browser to the provider.
+	 * the flow's cookie. Opened from the network of the session that asked
+	 * for it, it sends the browser on to the provider. From another network
+	 * it first shows a page that says who asked and warns, with Continue and
+	 * Cancel (`proceed`): someone may have sent the user their own link.
 	 */
 	visit(req: Request, ip: string): Response {
-		if (!this.#viewsPerNetwork.take(networkKey(ip))) {
+		const network = networkKey(ip);
+		if (!this.#viewsPerNetwork.take(network)) {
 			return this.#page(
 				429,
 				"Too many requests from your network. Wait a minute and try again.",
@@ -578,17 +672,120 @@ export class BrowserSignIn {
 			);
 		}
 		flow.cookie = randomBase64url(16);
+		this.#visited(flow);
 		const secure = this.#host.publicUrl().startsWith("https:");
 		const maxAge = Math.max(1, Math.ceil((flow.expiresAt - Date.now()) / 1000));
+		const cookie = `${cookieName(flow, secure)}=${flow.cookie}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${maxAge}${secure ? "; Secure" : ""}`;
+		const same = network === flow.network;
+		this.#host.logger.info("signin.opened", {
+			address: shortAddress(flow.addressId),
+			network: same ? "same" : "different",
+		});
+		if (same) {
+			return new Response(null, {
+				status: 302,
+				headers: {
+					location: flow.authorizationUrl,
+					"cache-control": "no-store",
+					"referrer-policy": "no-referrer",
+					"set-cookie": cookie,
+				},
+			});
+		}
+		flow.proceed = randomBase64url(24);
+		const headers = pageHeaders({
+			formAction: ["'self'", ...originList(flow.authorizationUrl)],
+		});
+		headers.append("set-cookie", cookie);
+		return new Response(
+			renderPage(
+				"Sign in",
+				`<h1>Sign in with ${escapeHtml(flow.provider.name)}?</h1>
+<p>A browser asks to sign in with ${escapeHtml(flow.provider.name)} and to join the browsers of your account as <strong>“${escapeHtml(flow.label)}”</strong> (${escapeHtml(flow.appName)}). This link was opened on another network than that browser's.</p>
+<p class="error">Only continue if you started this yourself in the tab-mcp panel of that browser.</p>
+<p>After the sign-in, never paste or send the address you land on to anyone. It would let them sign in as you.</p>
+<form method="post" action="/signin">
+<input type="hidden" name="flow" value="${escapeHtml(flow.start)}">
+<input type="hidden" name="proceed" value="${escapeHtml(flow.proceed)}">
+<div class="actions"><button type="submit" class="primary" name="action" value="continue">Continue</button>
+<button type="submit" class="secondary" name="action" value="cancel">Cancel</button></div>
+</form>`,
+			),
+			{ status: 200, headers },
+		);
+	}
+
+	/**
+	 * POST `/signin`: Continue or Cancel on the page that `visit` showed.
+	 * Needs the flow's cookie and the page's single-use token, so no link
+	 * alone can go past the page. Continue goes on to the provider; Cancel
+	 * ends the flow and goes back to the extension (`signin_error=cancelled`).
+	 */
+	async proceed(req: Request, ip: string): Promise<Response> {
+		if (!this.#viewsPerNetwork.take(networkKey(ip))) {
+			return this.#page(
+				429,
+				"Too many requests from your network. Wait a minute and try again.",
+			);
+		}
+		const origin = req.headers.get("origin");
+		if (origin !== null && origin !== this.#host.publicUrl()) {
+			return this.#page(403, "This form was sent from another site.");
+		}
+		const read = await readBodyWithDeadline(
+			req,
+			MAX_FORM_BYTES,
+			this.#host.config.bodyTimeoutMs,
+		);
+		if (!read.ok) return this.#page(400, "The form could not be read.");
+		const form = new URLSearchParams(new TextDecoder().decode(read.bytes));
+		this.#sweep(Date.now());
+		const state = this.#starts.get(form.get("flow") ?? "");
+		const flow = state === undefined ? undefined : this.#flows.get(state);
+		const token = form.get("proceed") ?? "";
+		const secure = this.#host.publicUrl().startsWith("https:");
+		const sent =
+			flow === undefined
+				? undefined
+				: cookieValue(req, cookieName(flow, secure));
+		if (
+			flow === undefined ||
+			flow.proceed === undefined ||
+			flow.cookie === undefined ||
+			sent === undefined ||
+			!constantTimeEqual(sent, flow.cookie) ||
+			!constantTimeEqual(token, flow.proceed)
+		) {
+			return this.#page(
+				400,
+				"This sign-in has expired or was already used. Start it again in your browser extension.",
+			);
+		}
+		delete flow.proceed; // single use
+		if (form.get("action") !== "continue") {
+			this.#dropFlow(flow.state);
+			this.#host.logger.info("signin.failed", {
+				address: shortAddress(flow.addressId),
+				reason: "cancelled",
+				provider: flow.provider.id,
+			});
+			return this.#backToExtension(flow, { signin_error: "cancelled" }, 303);
+		}
 		return new Response(null, {
-			status: 302,
+			status: 303,
 			headers: {
 				location: flow.authorizationUrl,
 				"cache-control": "no-store",
 				"referrer-policy": "no-referrer",
-				"set-cookie": `${cookieName(flow, secure)}=${flow.cookie}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${maxAge}${secure ? "; Secure" : ""}`,
 			},
 		});
+	}
+
+	/** The flow's link was opened: it no longer counts as unvisited. */
+	#visited(flow: Flow): void {
+		const n = (this.#unvisited.get(flow.network) ?? 1) - 1;
+		if (n <= 0) this.#unvisited.delete(flow.network);
+		else this.#unvisited.set(flow.network, n);
 	}
 
 	/**
@@ -611,7 +808,12 @@ export class BrowserSignIn {
 		const params = new URL(req.url).searchParams;
 		const state = params.get("state") ?? "";
 		const flow = this.#flows.get(state);
-		if (flow === undefined || flow.expiresAt <= Date.now()) {
+		// A flow still waiting for Continue on its page has not been sent on.
+		if (
+			flow === undefined ||
+			flow.expiresAt <= Date.now() ||
+			flow.proceed !== undefined
+		) {
 			return this.#page(
 				400,
 				"This sign-in has expired or was already used. Start it again in your browser extension.",
@@ -689,6 +891,8 @@ export class BrowserSignIn {
 		this.#host.logger.info("signin.checked", {
 			address: shortAddress(flow.addressId),
 			provider: provider.id,
+			// Where the sign-in came back from, against the session's network.
+			network: networkKey(ip) === flow.network ? "same" : "different",
 		});
 		return this.#backToExtension(flow, { signin: completion });
 	}
@@ -711,20 +915,26 @@ export class BrowserSignIn {
 			this.#failed(session, "code_refused", completion?.flow.provider.id);
 			return;
 		}
-		await this.#bind(completion.flow, completion.account);
+		await this.#bind(session, completion.flow, completion.account);
 	}
 
 	/** The flow's session still holds its address: a sign-in for it may bind. */
 	#current(flow: Flow): boolean {
+		const session = flow.session;
 		return (
-			flow.session.ready &&
-			this.#host.sessionOf(flow.addressId) === flow.session
+			session !== undefined &&
+			session.ready &&
+			this.#host.sessionOf(flow.addressId) === session
 		);
 	}
 
 	/** Bind the flow's address to the account; tell the session and the groups. */
-	async #bind(flow: Flow, account: SignInAccount): Promise<boolean> {
-		const { session, provider, addressId } = flow;
+	async #bind(
+		session: TabSession,
+		flow: Flow,
+		account: SignInAccount,
+	): Promise<boolean> {
+		const { provider, addressId } = flow;
 		if (!this.#current(flow)) return false;
 		const now = Date.now();
 		const store = this.#host.store;
@@ -793,11 +1003,12 @@ export class BrowserSignIn {
 	#backToExtension(
 		flow: Flow,
 		param: { signin: string } | { signin_error: SignInRedirectError },
+		status = 302,
 	): Response {
 		const url = new URL(flow.redirectUrl);
 		for (const [k, v] of Object.entries(param)) url.searchParams.set(k, v);
 		return new Response(null, {
-			status: 302,
+			status,
 			headers: {
 				location: url.href,
 				"cache-control": "no-store",
@@ -832,8 +1043,10 @@ export class BrowserSignIn {
 		if (flow === undefined) return;
 		this.#flows.delete(state);
 		this.#starts.delete(flow.start);
-		if (this.#flowOf.get(flow.session) === state) {
-			this.#flowOf.delete(flow.session);
+		if (flow.cookie === undefined) this.#visited(flow);
+		const session = flow.session;
+		if (session !== undefined && this.#flowOf.get(session) === state) {
+			this.#flowOf.delete(session);
 		}
 	}
 
@@ -875,6 +1088,27 @@ export class BrowserSignIn {
 
 const STORE_TEXT =
 	"the relay cannot change the sign-in right now; try again shortly";
+
+/** Whether the store's binding is the member a session holds. */
+function sameMember(
+	live: BindingRecord | undefined,
+	member: Membership,
+): boolean {
+	return (
+		live !== undefined &&
+		live.group === member.group &&
+		live.memberId === member.memberId
+	);
+}
+
+/** The origin of a URL, as a list for a CSP source list (empty if it is no URL). */
+function originList(url: string): string[] {
+	try {
+		return [new URL(url).origin];
+	} catch {
+		return [];
+	}
+}
 
 function membership(b: BindingRecord): Membership {
 	return {

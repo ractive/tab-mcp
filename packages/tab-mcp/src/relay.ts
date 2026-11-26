@@ -1720,6 +1720,10 @@ function startRelay(
 					signIn === undefined
 						? new Response("Not found", { status: 404 })
 						: signIn.visit(req, ipOf(req, srv)),
+				POST: (req, srv) =>
+					signIn === undefined
+						? new Response("Not found", { status: 404 })
+						: signIn.proceed(req, ipOf(req, srv)),
 			},
 			"/authorize.css": { GET: () => auth.stylesheet() },
 			"/token": {

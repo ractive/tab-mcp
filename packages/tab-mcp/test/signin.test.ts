@@ -1284,10 +1284,16 @@ describe("limits", () => {
 
 	test("sign-in starts per network: 20 across sessions, then rate_limited", async () => {
 		const ctx = start();
-		// Four sessions of five each: within every session's own limit.
+		// Four sessions of five each: within every session's own limit. Each
+		// link is opened, so the cap on unopened ones does not count.
+		const browser = new Browser();
 		for (let s = 0; s < 4; s++) {
 			const tab = await extension(ctx);
-			for (let i = 0; i < 5; i++) await beginSignIn(tab, "google");
+			for (let i = 0; i < 5; i++) {
+				expect(
+					(await browser.get(await beginSignIn(tab, "google"))).status,
+				).toBe(302);
+			}
 		}
 		const last = await extension(ctx);
 		last.send({
@@ -1300,6 +1306,331 @@ describe("limits", () => {
 		).toBe("rate_limited");
 		expect(ctx.logs.events("signin.rate_limited")[0]?.["limit"]).toBe(
 			"signin_starts",
+		);
+	});
+
+	test("review of PR 257: at most 3 unopened sign-ins per network; opening one makes room", async () => {
+		const ctx = start();
+		const tabs3: ScriptedTab[] = [];
+		const urls: string[] = [];
+		for (let i = 0; i < 3; i++) {
+			const t = await extension(ctx);
+			tabs3.push(t);
+			urls.push(await beginSignIn(t, "google"));
+		}
+		// A session's new start replaces its own: still three.
+		urls[0] = await beginSignIn(tabs3[0] as ScriptedTab, "github");
+		const fourth = await extension(ctx);
+		fourth.send({
+			type: "signin.start",
+			provider: "google",
+			redirectUrl: CHROME_REDIRECT,
+		});
+		expect(
+			((await fourth.next("signin.failed")) as SignInFailedMessage).reason,
+		).toBe("rate_limited");
+		expect(
+			ctx.logs.events("signin.rate_limited").map((e) => e["limit"]),
+		).toContain("signin_unvisited");
+		// Opening a link makes room.
+		expect((await new Browser().get(urls[1] ?? "")).status).toBe(302);
+		await beginSignIn(fourth, "google");
+	});
+
+	test("review of PR 257: an unopened flow goes with its session; an opened one stays, without it", async () => {
+		const ctx = start();
+		const a = await extension(ctx);
+		const unopened = await beginSignIn(a, "google");
+		const b = await extension(ctx);
+		const opened = await beginSignIn(b, "google");
+		const browser = new Browser();
+		const visit = await browser.get(opened);
+		expect(ctx.relay.sessionCount).toBe(2);
+		a.close();
+		b.close();
+		await waitFor(() => ctx.relay.sessionCount === 0, "the sessions to end");
+		// The unopened link is gone, and its place on the network is free.
+		expect((await new Browser().get(unopened)).status).toBe(400);
+		for (let i = 0; i < 3; i++) {
+			await beginSignIn(await extension(ctx), "google");
+		}
+		// The opened one comes back to the extension as failed.
+		const back = await browser.get(visit.location);
+		expect((await browser.get(back.location)).location).toBe(
+			redirectError("session_gone"),
+		);
+	});
+});
+
+describe("review of PR 257: a link opened on another network", () => {
+	/** The same flow, its link opened from another address (a proxy's header). */
+	function startBehindProxy() {
+		return start({ trustProxy: "x-forwarded-for" });
+	}
+	async function openFrom(url: string, ip: string, browser = new Browser()) {
+		const cookie = [...browser.cookies].map(([k, v]) => `${k}=${v}`).join("; ");
+		const res = await fetch(url, {
+			redirect: "manual",
+			headers: {
+				"x-forwarded-for": ip,
+				...(cookie === "" ? {} : { cookie }),
+			},
+		});
+		for (const line of res.headers.getSetCookie()) {
+			const [k, v] = (line.split(";")[0] ?? "").split("=");
+			if (k !== undefined && v !== undefined) browser.cookies.set(k, v);
+		}
+		return {
+			status: res.status,
+			location: res.headers.get("location") ?? "",
+			text: await res.text(),
+			csp: res.headers.get("content-security-policy") ?? "",
+		};
+	}
+	async function post(
+		ctx: Ctx,
+		form: Record<string, string>,
+		browser: Browser,
+		ip = "203.0.113.9",
+		origin: string | null = ctx.relay.url,
+	) {
+		const cookie = [...browser.cookies].map(([k, v]) => `${k}=${v}`).join("; ");
+		const res = await fetch(`${ctx.relay.url}/signin`, {
+			method: "POST",
+			redirect: "manual",
+			headers: {
+				"content-type": "application/x-www-form-urlencoded",
+				"x-forwarded-for": ip,
+				...(origin === null ? {} : { origin }),
+				...(cookie === "" ? {} : { cookie }),
+			},
+			body: new URLSearchParams(form),
+		});
+		return {
+			status: res.status,
+			location: res.headers.get("location") ?? "",
+			text: await res.text(),
+		};
+	}
+	const field = (html: string, name: string) =>
+		new RegExp(`name="${name}" value="([^"]+)"`).exec(html)?.[1] ?? "";
+
+	test("the same network goes straight to the provider", async () => {
+		const ctx = startBehindProxy();
+		const tab = await extension(ctx);
+		// The scripted tab connects without the header: its network is 127.0.0.1.
+		const url = await beginSignIn(tab, "google");
+		const visit = await openFrom(url, "127.0.0.1");
+		expect(visit.status).toBe(302);
+		expect(
+			visit.location.startsWith(`${fakes.endpoints.googleIssuer}/authorize`),
+		).toBe(true);
+	});
+
+	test("another network gets the page first: it names the browser and the app and warns; Continue goes on", async () => {
+		const ctx = startBehindProxy();
+		const tab = await extension(ctx);
+		const url = await beginSignIn(tab, "google", { label: "Chrome on macOS" });
+		const browser = new Browser();
+		const page = await openFrom(url, "203.0.113.9", browser);
+		expect(page.status).toBe(200);
+		expect(page.text).toContain("“Chrome on macOS”");
+		expect(page.text).toContain(APP);
+		expect(page.text).toContain(
+			"Only continue if you started this yourself in the tab-mcp panel of that browser.",
+		);
+		expect(page.text).toContain(
+			"never paste or send the address you land on to anyone",
+		);
+		expect(page.text).not.toContain("<script");
+		// The form may post here, and its redirect go to the provider.
+		expect(page.csp).toContain("form-action 'self' http://127.0.0.1:");
+		const answer = await post(
+			ctx,
+			{
+				flow: field(page.text, "flow"),
+				proceed: field(page.text, "proceed"),
+				action: "continue",
+			},
+			browser,
+		);
+		expect(answer.status).toBe(303);
+		expect(
+			answer.location.startsWith(`${fakes.endpoints.googleIssuer}/authorize`),
+		).toBe(true);
+		const back = await browser.get(answer.location);
+		const done = await browser.get(back.location);
+		tab.send({ type: "signin.complete", code: completionCode(done.location) });
+		await tab.next("signin.done");
+		expect(ctx.logs.events("signin.checked").at(-1)?.["network"]).toBe("same");
+		expect(ctx.logs.events("signin.opened").at(-1)?.["network"]).toBe(
+			"different",
+		);
+	});
+
+	test("Cancel ends the flow and goes back to the extension", async () => {
+		const ctx = startBehindProxy();
+		const tab = await extension(ctx);
+		const url = await beginSignIn(tab, "google");
+		const browser = new Browser();
+		const page = await openFrom(url, "203.0.113.9", browser);
+		const answer = await post(
+			ctx,
+			{
+				flow: field(page.text, "flow"),
+				proceed: field(page.text, "proceed"),
+				action: "cancel",
+			},
+			browser,
+		);
+		expect(answer.status).toBe(303);
+		expect(answer.location).toBe(redirectError("cancelled"));
+		// The flow is over: Continue after it, or the link again, does nothing.
+		const again = await post(
+			ctx,
+			{
+				flow: field(page.text, "flow"),
+				proceed: field(page.text, "proceed"),
+				action: "continue",
+			},
+			browser,
+		);
+		expect(again.status).toBe(400);
+		expect(await quietFor(tab)).toEqual([]);
+	});
+
+	test("Continue needs the page's token, the flow's cookie and this site; nothing goes past the page without them", async () => {
+		const ctx = startBehindProxy();
+		const tab = await extension(ctx);
+		const url = await beginSignIn(tab, "google");
+		const browser = new Browser();
+		const page = await openFrom(url, "203.0.113.9", browser);
+		const flow = field(page.text, "flow");
+		const proceed = field(page.text, "proceed");
+		// No token, a wrong token, no cookie, another site's form: refused.
+		expect(
+			(await post(ctx, { flow, action: "continue" }, browser)).status,
+		).toBe(400);
+		expect(
+			(
+				await post(
+					ctx,
+					{ flow, proceed: "x".repeat(32), action: "continue" },
+					browser,
+				)
+			).status,
+		).toBe(400);
+		expect(
+			(await post(ctx, { flow, proceed, action: "continue" }, new Browser()))
+				.status,
+		).toBe(400);
+		expect(
+			(
+				await post(
+					ctx,
+					{ flow, proceed, action: "continue" },
+					browser,
+					"203.0.113.9",
+					"https://evil.example",
+				)
+			).status,
+		).toBe(403);
+		// A GET of the link again does not get past it either.
+		expect((await openFrom(url, "203.0.113.9", browser)).status).toBe(400);
+		// The right form still works once.
+		expect(
+			(await post(ctx, { flow, proceed, action: "continue" }, browser)).status,
+		).toBe(303);
+		expect(
+			(await post(ctx, { flow, proceed, action: "continue" }, browser)).status,
+		).toBe(400);
+	});
+});
+
+describe("review of PR 257: rename and remove check the store", () => {
+	test("a browser whose binding is gone from the store cannot rename or remove, and is told", async () => {
+		const ctx = start();
+		const a = await extension(ctx);
+		const b = await extension(ctx);
+		await signIn(a, "google");
+		const db = await signIn(b, "google");
+		await groupWhere(a, (g) => g.members.length === 2);
+		// Another instance (or a race) removed a's binding; a's session still holds it.
+		await ctx.store.deleteBinding?.({ addressId: a.addressId });
+		a.send({ type: "member.remove", member: db.member });
+		expect(await a.next("signin.ended")).toEqual({
+			type: "signin.ended",
+			reason: "removed",
+		});
+		expect(await a.next("error")).toMatchObject({
+			code: "unknown_id",
+			for: "member.remove",
+		});
+		expect(await ctx.store.getBinding?.(b.addressId, Date.now())).toBeDefined();
+	});
+
+	test("a browser removed while it connects is told once it is connected", async () => {
+		const store = new MemoryTokenStore();
+		let hold: Promise<void> | undefined;
+		let release = () => {};
+		const slow = new Proxy(store, {
+			get(target, name, receiver) {
+				const value = Reflect.get(target, name, receiver);
+				if (typeof value !== "function") return value;
+				if (name !== "getBinding") return value.bind(target);
+				return async (...args: unknown[]) => {
+					const result = await value.apply(target, args);
+					const gate = hold;
+					hold = undefined;
+					if (gate !== undefined) await gate;
+					return result;
+				};
+			},
+		});
+		const ctx = start({ store: slow });
+		const secret = newSecret();
+		const a = await extension(ctx);
+		const b = await extension(ctx, { secret });
+		await signIn(a, "google");
+		const db = await signIn(b, "google");
+		b.close();
+		await groupWhere(
+			a,
+			(g) => g.members.find((m) => m.id === db.member)?.online === false,
+		);
+		// b connects again; its binding is read, then held before the answer.
+		hold = new Promise((resolve) => {
+			release = resolve;
+		});
+		const again = new ScriptedTab(ctx.wsUrl, {
+			origin: CHROME,
+			appId: APP,
+			capabilities: ["signin.v1"],
+			secret,
+		});
+		tabs.push(again);
+		const connecting = again.connect();
+		await waitFor(() => hold === undefined, "b's binding to be read");
+		// Meanwhile a removes it.
+		a.send({ type: "member.remove", member: db.member });
+		await groupWhere(a, (g) => g.members.length === 1);
+		release();
+		const session = await connecting;
+		expect(session.signIn?.member).toBe(db.member); // read before the removal
+		expect(await again.next("signin.ended")).toEqual({
+			type: "signin.ended",
+			reason: "removed",
+		});
+		// No later group state brings it back.
+		await Bun.sleep(100);
+		const groups = a.received.filter(
+			(m) => m.type === "group",
+		) as GroupMessage[];
+		expect(groups.at(-1)?.members.map((m) => m.id) ?? []).not.toContain(
+			db.member,
+		);
+		expect(await ctx.store.getBinding?.(again.addressId, Date.now())).toBe(
+			undefined,
 		);
 	});
 });

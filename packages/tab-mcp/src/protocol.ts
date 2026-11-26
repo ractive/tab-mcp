@@ -139,7 +139,8 @@ export type SignInFailure =
 export type SignInRedirectError =
 	| "provider_error"
 	| "unchecked"
-	| "session_gone";
+	| "session_gone"
+	| "cancelled";
 export interface SignInFailedMessage {
 	type: "signin.failed";
 	provider?: string;

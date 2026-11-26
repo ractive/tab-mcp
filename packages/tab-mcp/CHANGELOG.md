@@ -20,7 +20,9 @@ The relay. Each relay release is also a Docker image, `ractive/tab-mcp` and
   or remove any member. A sign-in lasts 90 days. The relay binds a browser only when the
   extension itself hands back the completion code of the sign-in's redirect URL
   (`signin.complete`), so someone else's sign-in link finished in another person's
-  browser binds nothing. For Microsoft the relay says whether the account is personal or
+  browser binds nothing unless they also send its code on; a link opened from another
+  network than its browser's first shows a page that warns, with Continue and Cancel.
+  For Microsoft the relay says whether the account is personal or
   work (`kind`): one address can name both. The relay keeps a hash of the account,
   never the e-mail address or the user name. Settings: `TAB_MCP_SIGN_IN_APPS` and
   `TAB_MCP_SIGN_IN_{GOOGLE,MICROSOFT,GITHUB}_CLIENT_ID` and `_CLIENT_SECRET`; every

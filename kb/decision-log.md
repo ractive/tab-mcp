@@ -6010,9 +6010,23 @@ owner had not decided, marked (open) where the owner may want otherwise.
   extension started intercepts it. A user who finishes a stranger's link is left with
   the code in their own address bar; the stranger's session never gets it, nothing is
   bound, and the display name never leaves the relay. The cookie check stays as well.
-  Left over: someone who holds the session and gets the user to give them the code
-  within the 2 minutes. Google and
-  Microsoft share identity binding's ID token checks (`redeemIdToken`, factored out of
+  The stranger gets nothing unless the user also hands over the code (the address
+  they land on); then the stranger's session completes it within the 2 minutes and
+  joins the group.
+- **A page where the networks differ** (review of PR 257, coordinator's decision). The
+  relay compares the network of the request that opens `/signin?flow=` with the
+  session's (`networkKey`, as the limits use: an IPv4 address, an IPv6 /56). The same:
+  straight to the provider. Different: a relay page (no script, the pages' CSP) that
+  names the browser's label and the app, says "Only continue if you started this
+  yourself in the tab-mcp panel of that browser." and warns never to paste or send the
+  address one lands on afterwards to anyone. Continue is `POST /signin` with the page's
+  single-use token, the flow's cookie and this origin (a link alone cannot pass it);
+  Cancel ends the flow and goes to `redirectUrl?signin_error=cancelled`. The callback's
+  network is logged too (`signin.checked` `network`); `signin.done` and `group` carry
+  nothing more. Remaining risk, plainly: a user who continues past the page and sends
+  the code lets the stranger in; on the same network (one office, one household) there
+  is no page.
+- **Providers.** Google and Microsoft share identity binding's ID token checks (`redeemIdToken`, factored out of
   `oidc.ts`); `prompt=select_account` everywhere, so a browser can choose another
   account. Google's issuer is accepted with or without `https://`, as Google documents.
   GitHub supports PKCE S256 for OAuth Apps (its docs, read 2026-11-26), so the flow uses
@@ -6053,7 +6067,9 @@ owner had not decided, marked (open) where the owner may want otherwise.
   the name: the store keeps no kind, and the group state has none (the extension keeps
   it with the name).
 - **Limits** (A8's style): starts per session 5, then one per 30 s; per network 20,
-  then one per 30 s; one open flow per session (a new start replaces it), 10 000 in all;
+  then one per 30 s; one open flow per session (a new start replaces it), at most 3 not
+  yet opened per network, and a flow nobody opened ends with its session (review of PR
+  257: filling the 10 000 in all takes opening each link), 10 000 in all;
   views of the sign-in URL and its callback per network 60, then one a second (two per
   sign-in); 16 members; the session's control budget as for every message.
 - **Store.** Optional binding methods on `TokenStore` (all five or none, conformance
@@ -6065,5 +6081,8 @@ owner had not decided, marked (open) where the owner may want otherwise.
   out until it connects again (logged); one that cannot be written fails the sign-in
   (`store_unavailable`); a sign-out, rename or removal that cannot be written is refused
   with `store_unavailable` and changes nothing.
-- **No confirmation page at the relay:** with the completion code (above) a stranger's
-  link finished by someone else binds nothing, so the page is not needed.
+- **Rename and remove check the store** (review of PR 257): each first reads the
+  sender's own binding, which must still be the member the session holds (else the
+  session is told `signin.ended` `removed` and the message gets `unknown_id`); and a
+  session's binding is read again once it is connected, so a browser removed while its
+  `hello` was answered is told so and is not counted online.
