@@ -596,6 +596,28 @@ gets any of it.
 - Sign-in lasts 90 days; limits per session, per network, flows in all, page views per
   network, 16 members per group. The full analysis is A16 in `docs/threat-model.md`.
 
+### A17: AI apps connected to a group (iteration 53, PR 3)
+
+An AI app pairs with a group by signing in on the pairing page with the account
+(`account.<provider>.` state, the same providers, PKCE); the grant is the group's
+(`group` on the token record, its address id `group:<key>`), allowed when the group has
+a binding, online or not (DEC-232).
+
+- A member is a man in the middle of the calls the relay sends it: it sees their
+  arguments, answers as it likes, and can steer calls to itself (`group.pin`,
+  `group.mode`, `focus`, which is its own word stamped with the relay's clock); never a
+  caller, never another member's tabs or calls. Every result names the member that
+  answered; every panel shows mode, pin and focus.
+- Whoever can sign in to the account (A16) connects an AI app without asking any browser;
+  members see the grant and any member revokes it for the whole group.
+- The relay reads method, tool name, `tab` argument and the result of a group grant's
+  requests (rewrites `tab`, adds the answered-by line); page grants pass byte for byte.
+  It learns focus changes only in mode "the tab in front".
+- A `tab` or pin naming an offline or removed member fails with the reason and the
+  `list_tabs` hint; only front mode falls back to the member online last, and says so.
+- Limits: fan-out to at most 16 members, 15 s each; 256 KiB of joined tabs; 64 waiting
+  requests per group; `focus` 20, then 2/s per session, dropped past it.
+
 ### A14: WebMCP callers of mirrored tools (iteration 25)
 
 Unless a page sets `webmcp: false`, the library also registers the page's tools with
@@ -743,6 +765,9 @@ is A15 in `docs/threat-model.md` (DEC-122 to DEC-126, DEC-164 to DEC-167).
   so does a stranger whose link a user finishes and who gets the address the user lands
   on (warned against on another network, not on the same one); members can rename and
   remove each other; a store copy reveals which public GitHub accounts signed in.
+- Group grants (A17): a taken-over account connects an AI app to the group without a
+  browser asking; every member sees and may falsify the calls routed to it and can steer
+  calls to itself; results name the member.
 
 # Citations
 

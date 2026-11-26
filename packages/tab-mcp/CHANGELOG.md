@@ -31,15 +31,31 @@ The relay. Each relay release is also a Docker image, `ractive/tab-mcp` and
   the `signin.*`, `group` and `member.*` messages, only for a session that names
   `signin.v1` in its `hello`. Every other session, every extension released so far
   among them, gets exactly the answers it got before.
+- Group grants (DEC-232): on the pairing page of those apps an AI app's user can sign in
+  with the same providers instead of typing a code, and the AI app is connected to every
+  browser signed in with that account, also those not open then. The relay sends each
+  call to one of them: the tab a `tab` argument names (`<member>:<tab>`, the member taken
+  off before the call reaches it), the group's pinned tab, or the tab in front of the
+  browser whose window had the focus last (else the one online last, and the result says
+  so). `list_tabs` goes to every browser online and comes back joined; `use_tab` pins for
+  the group. A pinned or named browser that is offline fails the call with the reason,
+  never a silent move. Every result names the browser that answered (a last text, and
+  `_meta["ch.ractive.tab-mcp/answeredBy"]`). New in the protocol, for `signin.v1`
+  sessions only: `group` gains `mode`, `pin`, `focus` and `grants`; the tab sends
+  `group.mode`, `group.pin`, `focus` (window focus, no URL, only in mode "the tab in
+  front") and `group.grant.revoke`. Page grants pass byte for byte as before.
 - The token store has optional binding methods (`putBinding`, `getBinding`,
-  `listBindings`, `renameBinding`, `deleteBinding`), with conformance tests; a relay with
-  sign-in refuses to start with a store that lacks them.
+  `listBindings`, `renameBinding`, `deleteBinding`, and for a group's mode
+  `getGroupMode`, `setGroupMode`), with conformance tests; a relay with sign-in refuses
+  to start with a store that lacks them. A token record may carry `group` (a group
+  grant), which a store must keep.
 
 ### Changed
 
-- The SQLite store is at schema 7: a `bindings` table. The tokens stay as they are, and
-  older relays of schema 6 (since the fixed address, DEC-196) can still open the file;
-  they leave the table alone.
+- The SQLite store is at schema 8: a `bindings` table, a `groups` table and the tokens'
+  `group_key`. The tokens stay as they are. Relays before this one refuse a file at
+  schema 8 (they would drop a group grant's group when they refresh it): roll back with
+  the backup made before the upgrade.
 
 ## [0.13.3][relay-0.13.3] - 2026-11-23
 

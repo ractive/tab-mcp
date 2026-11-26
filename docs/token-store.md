@@ -56,6 +56,7 @@ interface TokenRecord {
   usedAt?: number;        // refresh tokens: when it was exchanged
   subject?: string;       // identity binding: hash of the person the grant was made for
   clientAuth?: "private_key_jwt"; // the grant needs the AI app's client assertion
+  group?: string;         // a group grant: the group it was made for (DEC-232)
 }
 
 interface GrantSummary {
@@ -88,6 +89,14 @@ it unchanged too, including on used refresh tokens. Here a store that drops it *
 break something open: the grant's refresh tokens then work without the AI app's key. The
 conformance suite checks the round trip.
 
+`group` is set only on group grants (DEC-232): an AI app connected to every browser
+signed in with one account. Its `addressId` is then the group's own, `group:<group>`,
+which no page has, so `listGrants`, `revoke` and the tombstones work for the group as
+for a page and need nothing new. Store `group` and return it unchanged, including on
+used refresh tokens. A store that drops it does not break anything open: the relay then
+finds no page at `group:<group>` and answers that the page is not open. The conformance
+suite checks the round trip.
+
 ```ts
 interface RevokeOptions {
   now: number;
@@ -102,12 +111,14 @@ interface TokenStore {
   listGrants(addressId: string, now: number): Promise<GrantSummary[]>;
   deleteExpired(now: number): Promise<number>;
   claimNonce?(key: string, expiresAt: number, now: number): Promise<boolean>;
-  // Browser sign-in (DEC-231): all five or none.
+  // Browser sign-in (DEC-231, DEC-232): all seven or none.
   putBinding?(record: BindingRecord, maxMembers: number, now: number): Promise<"ok" | "full">;
   getBinding?(addressId: string, now: number): Promise<BindingRecord | undefined>;
   listBindings?(group: string, now: number): Promise<BindingRecord[]>;
   renameBinding?(group: string, memberId: string, label: string, now: number): Promise<boolean>;
   deleteBinding?(selector: BindingSelector): Promise<BindingRecord | undefined>;
+  getGroupMode?(group: string): Promise<"front" | "pinned" | undefined>;
+  setGroupMode?(group: string, mode: "front" | "pinned"): Promise<void>;
   close?(): Promise<void>;
 }
 ```
@@ -126,7 +137,7 @@ epoch.
 | `listGrants` | The grants of an address id that still have a usable token at `now` (an unexpired access token, or an unexpired and unused refresh token), oldest grant first. The page uses it to list connected apps. |
 | `deleteExpired` | Delete every record with `expiresAt <= now` and every tombstone whose `keepUntil` has passed. Return how many records were deleted. The relay calls it every 10 minutes. It should also drop `claimNonce` entries whose `expiresAt` has passed. |
 | `claimNonce` | Optional (DEC-106): remember `key` (a hash of an AI app's client id and the `jti` of its client assertion) until `expiresAt`. Return `true` for the one call that recorded it, `false` while it is remembered; an entry with `expiresAt <= now` counts as absent. Atomic like `markUsed` (Redis `SET key 1 PXAT expiresAt NX`, SQL `INSERT … ON CONFLICT DO UPDATE … WHERE expires_at <= now`). Without it the relay keeps used `jti`s in its own memory, until it restarts. `expiresAt` is at most about six minutes ahead, and the relay writes at most 10 000 live entries per AI app host, so the table stays small. |
-| `putBinding`, `getBinding`, `listBindings`, `renameBinding`, `deleteBinding` | Optional, all five or none (DEC-231): the sign-ins of browsers, one `BindingRecord` per address id (`group`, a hash of the account; `memberId`, unique; `provider`, `app`, `label`, `createdAt`, `expiresAt`). A binding with `expiresAt <= now` counts as absent in every method, and `deleteExpired` should drop it. `putBinding` inserts or replaces the binding of the record's address id and returns `"full"`, storing nothing, when the group already has `maxMembers` live bindings of other addresses; counting and writing are one atomic step (a transaction), so two browsers cannot both take a group's last place. `listBindings` returns a group's live bindings oldest first (`createdAt`, then `memberId`). `renameBinding` changes the label of a live member of the group and returns whether there was one. `deleteBinding` deletes the binding of an address id or of a member id in a group and returns it. `revoke` leaves bindings alone. A relay with `TAB_MCP_SIGN_IN_APPS` refuses to start with a store that lacks them. |
+| `putBinding`, `getBinding`, `listBindings`, `renameBinding`, `deleteBinding`, `getGroupMode`, `setGroupMode` | Optional, all seven or none (DEC-231, DEC-232): the sign-ins of browsers, one `BindingRecord` per address id (`group`, a hash of the account; `memberId`, unique; `provider`, `app`, `label`, `createdAt`, `expiresAt`). A binding with `expiresAt <= now` counts as absent in every method, and `deleteExpired` should drop it. `putBinding` inserts or replaces the binding of the record's address id and returns `"full"`, storing nothing, when the group already has `maxMembers` live bindings of other addresses; counting and writing are one atomic step (a transaction), so two browsers cannot both take a group's last place. `listBindings` returns a group's live bindings oldest first (`createdAt`, then `memberId`). `renameBinding` changes the label of a live member of the group and returns whether there was one. `deleteBinding` deletes the binding of an address id or of a member id in a group and returns it. `revoke` leaves bindings alone. `getGroupMode` returns the mode a member last set for a group (where its AI apps' calls go, `front` or `pinned`), or `undefined`; `setGroupMode` replaces it; `deleteExpired` should drop the mode of a group with no live binding left. A relay with `TAB_MCP_SIGN_IN_APPS` refuses to start with a store that lacks them. |
 | `close` | Optional: release connections or file handles. |
 
 ## Guarantees
@@ -404,14 +415,19 @@ Map the methods like this:
   ON CONFLICT (key) DO UPDATE SET expires_at = excluded.expires_at WHERE
   nonces.expires_at <= $now`; return whether one row changed.
 - `app`: a text column on `tokens`, not null, for `app`.
-- `subject` and `client_auth`: nullable text columns on `tokens` for `subject` and
-  `clientAuth`.
+- `subject`, `client_auth` and `group_key`: nullable text columns on `tokens` for
+  `subject`, `clientAuth` and `group`.
+- The binding methods, if the relay lets browsers sign in: a table `bindings` (one row
+  per address id, `member_id` unique, an index on the group), and a table `groups`
+  (`group_key` primary key, `mode`) for `getGroupMode` and `setGroupMode`.
 
 The built-in `SqliteTokenStore` in the
 [relay's source](../packages/tab-mcp/src/store/sqlite.ts) follows exactly this plan and
-is a complete example. Its schema is at version 6, which added the `app` column. A file
-from an older relay is migrated when it is opened, and that step deletes every token in
+is a complete example. Its schema is at version 8: 6 added the `app` column, 7 the
+`bindings` table (DEC-231), 8 the tokens' `group_key` and the `groups` table (DEC-232).
+A file from before 6 is migrated when it is opened, and that step deletes every token in
 it: they were made for addresses that no longer exist, so every AI app pairs again. The
-file is then marked as needing a relay that knows schema 6, and an older relay refuses
-to open it (see [Upgrading](self-hosting.md#upgrading)). Run the conformance suite
+steps to 7 and 8 keep every token. A file at 8 is marked as needing a relay that knows
+schema 8: an older relay would drop a group grant's group when it refreshes it, so it
+refuses to open the file (see [Upgrading](self-hosting.md#upgrading)). Run the conformance suite
 against your store before you use it.

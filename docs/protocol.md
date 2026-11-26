@@ -7,7 +7,9 @@ implementation or want to know what passes over the connection.
 
 The protocol tunnels the AI app's MCP HTTP requests to the tab and the tab's HTTP
 responses back. It also carries the session's control messages: pairing, connected apps,
-the heartbeat and, for a browser extension that asks for it, its sign-in. It knows nothing about MCP tools. The tab runs the MCP server itself
+the heartbeat and, for a browser extension that asks for it, its sign-in and its group.
+It knows nothing about MCP tools, except for a group grant's requests, of which it reads
+the method, the tool name and its `tab` argument ([Group grants](#group-grants)). The tab runs the MCP server itself
 (MCP revision 2026-07-28, stateless); the relay authenticates AI apps and forwards their
 requests.
 
@@ -162,13 +164,14 @@ the grants of the previous one and ends their requests in flight.
 From relay 0.14 on (DEC-231): a browser extension can sign in at the relay with an
 account at Google, Microsoft or GitHub. Every browser signed in with the same account is
 a member of that account's *group*. This section is the relay's side: it binds the
-session's address id to the account and keeps the group's members informed; what a
-group's members do together beyond that is not part of the protocol yet.
+session's address id to the account and keeps the group's members informed. An AI app
+connected to the whole group, and where its calls go, is the next section,
+[Group grants](#group-grants).
 
 Only a session whose `hello` named `signin.v1` in `capabilities`, and whose app the
 relay lets sign in (`TAB_MCP_SIGN_IN_APPS`, [configuration](configuration.md#browser-sign-in)),
-gets any message of this section, and only for it are `signin.*` and `member.*`
-messages. For every other session they are unknown types (`unknown_type` when they carry
+gets any message of this section and the next, and only for it are `signin.*`,
+`member.*`, `group.*` and `focus` messages. For every other session they are unknown types (`unknown_type` when they carry
 an `id`, else ignored), and its `session` has no `signIn`: it is answered byte for byte
 as by a relay without sign-in.
 
@@ -182,14 +185,16 @@ as by a relay without sign-in.
 | `signin.failed` | R→T | `provider?`, `reason`, `message` | The sign-in did not happen. `reason`: `not_offered` (no such provider here), `bad_redirect` (the redirect URL is not the extension's, or the page is no extension), `rate_limited`, `busy` (too many sign-ins open on the relay), `provider_unavailable` (its metadata cannot be fetched), `code_refused` (a `signin.complete` whose code is unknown, used, expired or another session's), `group_full` (the account has 16 browsers), `store_unavailable`. `message` is a fixed text per reason. A binding the browser had stays. What goes wrong between the relay's URL and the redirect back is not sent here: it comes back in the redirect URL (below). |
 | `signin.out` | T→R | none | Sign out: the binding ends. Answered with `signin.ended` `signed_out` (also when the browser was not signed in), or `error` `store_unavailable` with `for: "signin.out"`, the binding then kept. |
 | `signin.ended` | R→T | `reason` | The browser is no longer signed in: `signed_out` (its own `signin.out`), `removed` (another member removed it), `expired` (90 days after its sign-in). It may sign in again. |
-| `group` | R→T | `provider`, `self`, `expiresAt`, `maxMembers`, `members` | The group's state: to every online member when a member joins, leaves, is renamed, connects or goes offline, and to a member when it connects. `self` is this browser's member id, `expiresAt` when its sign-in ends unless it signs in again, `maxMembers` 16. `members`, oldest sign-in first, this browser included: `{id, label, online, signedInAt}`. A member id is random (`m_…`) and tells nothing about the address id. A tab ignores fields it does not know: later relays add some. |
+| `group` | R→T | `provider`, `self`, `expiresAt`, `maxMembers`, `members`, `mode`, `pin?`, `focus?`, `grants` | The group's state: to every online member when a member joins, leaves, is renamed, connects or goes offline, when the mode, the pin, the member calls go to or the group's grants change, and to a member when it connects. `self` is this browser's member id, `expiresAt` when its sign-in ends unless it signs in again, `maxMembers` 16. `members`, oldest sign-in first, this browser included: `{id, label, online, signedInAt}`. A member id is random (`m_…`, `m_` and 16 characters of `A-Z`, `a-z`, `0-9`, `-`, `_`) and tells nothing about the address id. `mode`, `pin`, `focus` and `grants` (relay 0.14 on, DEC-232): see [Group grants](#group-grants). A tab ignores fields it does not know: later relays add some. |
 | `member.rename` | T→R | `member`, `label` | Rename a member of this browser's group, itself or another (1-64 characters, cleaned; nothing visible left is `bad_message`). Every member then gets `group`. |
 | `member.remove` | T→R | `member` | Remove a member of this browser's group: its binding ends and, if it is online, it gets `signin.ended` `removed`; every member left gets `group`. Removing itself is `signin.out`. |
 
 A `member.rename` or `member.remove` for a member that is not in this browser's group,
 or from a browser that is not signed in, gets `error` `unknown_id` with `for` and
 `member`; a store failure gets `store_unavailable` the same way. The relay handles a
-session's sign-in messages one after another, in the order they came. They count against the control budget like every other message.
+session's sign-in and group messages one after another, in the order they came. They
+count against the control budget like every other message, except `focus`, which has a
+budget of its own ([Group grants](#group-grants)).
 
 **The flow.** The relay is the only OAuth client at the providers.
 
@@ -251,6 +256,133 @@ and restarts of the browser (its address secret stays) and ends 90 days after th
 sign-in: the relay then sends `signin.ended` `expired`, at the latest one sweep (10
 minutes) later. A signed-in browser's session is not closed early as unpaired
 (`TAB_MCP_UNPAIRED_IDLE_TIMEOUT_S`).
+
+### Group grants
+
+From relay 0.14 on (DEC-232): an AI app can be connected to a whole group, every browser
+signed in with one account, instead of to one browser. Its calls then go to the member
+the relay chooses, and within the member to the tab the extension chooses. Only the
+sessions of [Browser sign-in](#browser-sign-in) take part; a page grant, also one of a
+signed-in browser, is tunnelled exactly as before (below), byte for byte.
+
+**Pairing.** The pairing page (`/authorize`) of an app in `TAB_MCP_SIGN_IN_APPS` offers
+"Sign in with Google / Microsoft / GitHub" (the providers configured) beside the code
+field; a code still pairs with one browser. The sign-in uses the providers of the
+browsers' sign-in, the one callback `https://<relay>/authorize/callback` with a `state`
+that starts with `account.` (a browser's starts with `browser.`, identity binding's has
+neither), PKCE, and the pairing page's rules otherwise: the AI app's verified host, the
+page's cookie, a sign-in counts as a guess against the network's limit and is given back
+when it pairs. The account's key (as for a browser's sign-in) selects the group. It pairs
+when the group exists, that is when at least one browser is signed in with the account,
+online or not; the page says so beside the buttons. Without one the page says: "No
+browser is signed in with this … account. In the tab-mcp browser extension, sign in with
+the same account, then sign in here again, or type the code." The grant is the group's:
+its token record names the group (`group`) and has the group's own address id,
+`group:<group key>`, which no page has. Members never see one another's address ids, and
+an AI app sees only the members' ids and labels.
+
+**The id of a tab.** A browser's own tab ids are decimal strings (1 to 15 digits, the
+tab-mcp browser extension's `list_tabs`, DEC-230). For a group, `<member>:<tab>`: the
+member id, a colon and the browser's tab id, for example `m_Q2x4…:1234`. The relay takes
+the member off before a call reaches the member, so a member only ever sees its own ids.
+
+**Where a group grant's request goes.** The relay reads only the JSON-RPC method of a
+POST to `/s/<app>/mcp` and, for `tools/call`, the tool name and the argument `tab`:
+
+1. `tools/call` with a `tab` argument: the member it names. The relay sets the argument
+   to the browser's own tab id (and an `mcp-param-tab` header, if the AI app sent one)
+   and tunnels the call. A `tab` that is not `<member>:<tab>`, or names no member of the
+   group, is answered by the relay: a tool result with `isError` that ends with "Call
+   list_tabs for the tabs you may use, then pass tab with the call, or use_tab to pin
+   one."
+2. Otherwise, in mode `pinned` with a pin: the pin's member. The relay does not add a
+   `tab` argument: the pinned member holds the pin itself (it has it from `group`) and
+   sends a call without `tab` to the pinned tab, the `page_<name>` tools included, which
+   cannot take one. A pinned tab that was closed is the member's to answer, as without
+   a group.
+3. Otherwise (mode `front`, or mode `pinned` without a pin): the member whose window had
+   the focus last, by the relay's clock of the `focus` messages; without one online,
+   the member that came online last, and the result says so. In mode `pinned` that
+   member pins the tab in front of its window at the call, as without a group, and sends
+   `group.pin` for it.
+
+`tools/list`, `server/discover`, `subscriptions/listen`, notifications and every other
+method go by rules 2 and 3. A listen stream stays on the member it was opened on until
+it ends. Two exceptions:
+
+- `list_tabs` goes to every member online: the relay sends each of them the same
+  request (tunnelled requests it makes itself, with the AI app's grant) and joins the
+  answers. Each member lists its own tabs only and gets nothing of another's. The joined
+  result is a tool result whose `structuredContent` (and first text, the same JSON) is
+  `{mode, tabs, browsers, more?, note}`: `mode` "the tab in front" or "a pinned tab";
+  `tabs`, member by member in the order of `members`, each `{tab, browser, title, url,
+  inFront?, pinned?}` with `tab` the group's id, `browser` the member's label, `inFront`
+  the tab in front of that browser's window as it said, `pinned` the group's pin; at
+  most 256 KiB of tabs, the rest counted in `more`; `browsers`, every member, offline
+  ones too, `{browser, member, online, tabs?, more?, notReadable?, error?}`, where
+  `error` says why it lists none (not online, busy, it did not answer within 15
+  seconds, its answer was no list); `note` where calls without `tab` go. A member's
+  answer is checked like any answer (tab ids of the browser's form, titles cut at 200
+  characters, addresses at 2048, at most 100 tabs).
+- `use_tab` with `<member>:<tab>` goes to that member as in rule 1. When the member's
+  result is not an error (it pins only a tab it may read), the relay sets the group's
+  pin to that member and tab, switches the group to mode `pinned` (also from `front`:
+  an explicit request does not fail on a setting the AI app cannot see) and sends
+  `group` to every member.
+
+The relay waits for the member as for a page that is not open (`TAB_MCP_PAGE_WAIT_S`,
+at most 64 requests per group, the relay's session cap in all), then answers:
+
+- the member a `tab` argument or the pin names is not online: a tool result with
+  `isError`, "The pinned tab is in the browser “<label>”, which is not online; nothing
+  was done in another tab." (or "The tab … is in …") and the `list_tabs` hint; other
+  methods get JSON-RPC error `-31001` with that text (HTTP 200, a notification 503). It
+  never goes to another browser by itself. A pin to a member that was removed from the
+  group fails the same way, "The pinned tab was in a browser that is no longer signed in
+  with the user's account; …".
+- no member online (rules 3 and `list_tabs`): the answers of [When the page is not
+  open](#when-the-page-is-not-open) with the text "No browser signed in with the user's
+  account in the tab-mcp browser extension is online. Ask the user to open one of them
+  and turn on AI access there, then try again." A tool call whose member went away while
+  it ran: "The browser closed its connection while the tool was running, so it may or
+  may not have finished. …" (`-31003` for other methods).
+
+**Who answered.** Every result the relay passes on for a group grant names the member:
+a tool result gets one more text at the end of `content`, "Answered by the browser
+“<label>” (its tabs are <member>:<id> in list_tabs).", followed, for rule 3's fallback,
+by why it was not the browser whose window had the focus last; every result (`tools/list`
+and `server/discover` too) gets `_meta["ch.ractive.tab-mcp/answeredBy"] = {member,
+label}` (`list_tabs`: `{members: [{member, label}, …]}`). The rest of the result,
+`structuredContent` included, is the member's: an output schema still holds. JSON-RPC
+errors pass unchanged. In an event stream only the event with the request's response is
+rewritten; the other events, comments and keep-alives pass as they came.
+
+**The mode, the pin and the focus.** One setting per group, the same in every panel:
+
+| Type | Dir | Fields | Meaning |
+|---|---|---|---|
+| `group.mode` | T→R | `mode` | `front` or `pinned` (anything else is `bad_message`). Any member sets it; `front` drops the pin; `pinned` keeps none until a call or `group.pin` pins. The relay keeps the mode in its token store (it survives a restart); a store failure is `error` `store_unavailable` with `for: "group.mode"`, the mode unchanged. Every member gets `group`. |
+| `group.pin` | T→R | `tab` | Pin a tab of this browser for the group: its own tab id, 1 to 15 digits (else `bad_message`). Sent by "Work here" in a panel and by the member that pins the tab in front at a call in mode `pinned`. Switches the group to `pinned`; every member gets `group`. |
+| `focus` | T→R | none | A window of this browser gained the focus: no URL, no title, no tab. A member sends it in mode `front` only (and once after it connects, if one of its windows has the focus); in mode `pinned` the relay ignores it and learns nothing of the user's switching. The relay stamps it with its own clock. It does not count against the control budget: 20, then two a second per session, past that it is dropped (logged once as `group.focus_limited`), never an error or a close. |
+| `group.grant.revoke` | T→R | `grantId` | Disconnect an AI app from the whole group: any member revokes any of the group's grants. Its tokens stop working at once, its requests in flight on every member end (`-31009`, as for a page grant), and every member gets `group` without it. A grant that is not the group's: `error` `unknown_id` with `for` and `grantId`; a store failure: `store_unavailable` the same way. |
+
+The `group` message carries the state:
+
+- `mode`: `front` or `pinned`, from the store when the group's first member connects
+  (`front` if none was ever set).
+- `pin`: in mode `pinned`, once there is one, `{member, tab}` with the browser's own tab
+  id. The relay keeps it in memory: a relay that restarts forgets it, and the next call
+  pins again. The pinned member sends calls without `tab` to that tab; every other
+  member gets none of them while the pin is there.
+- `focus`: in mode `front`, the member calls without `tab` go to now (rule 3, the
+  fallback included); sent again when it changes.
+- `grants`: the AI apps connected to the whole group, as `session.grants` lists a page's:
+  `{grantId, client: {id, name, host}, createdAt}`, oldest first. A group grant that
+  expires leaves the list at the latest one sweep (10 minutes) later. There is no
+  `grant.added` or `grant.removed` for a group grant: the next `group` lists them.
+
+Messages of this section from a browser that is not signed in get `error` `unknown_id`
+with `for` (and `grantId` for `group.grant.revoke`); `focus` is ignored.
 
 ### Tunnelled MCP requests
 
@@ -467,8 +599,10 @@ read.
 An `unknown_id` or `store_unavailable` that answers a `grant.revoke`, `grants.revokeAll`
 or `identity.logout` names that message in `for` (relays from the third 0.10 release on), and the
 grant of a `grant.revoke` in `grantId`. One that answers a `signin.out`, `member.rename`
-or `member.remove` ([Browser sign-in](#browser-sign-in)) names it in `for` too, and the
-member of the last two in `member`:
+or `member.remove` ([Browser sign-in](#browser-sign-in)), or a `group.mode`, `group.pin`
+or `group.grant.revoke` ([Group grants](#group-grants)), names it in `for` too, the
+member of `member.rename` and `member.remove` in `member`, and the grant of
+`group.grant.revoke` in `grantId`:
 
 ```json
 {"type":"error","code":"store_unavailable","message":"the relay cannot change grants right now; try again shortly","for":"grant.revoke","grantId":"g_…"}
@@ -485,11 +619,11 @@ first 0.16 release and older, which ignore them).
 |---|---|---|
 | `bad_message` | relay | Not JSON, missing fields, a binary frame, a malformed `secret`, a missing or malformed `app.id`, a malformed `hello.capabilities`. The library sends none to the relay: it drops a message it cannot read. |
 | `unknown_type` | relay | Message type not understood, but an answer was expected. |
-| `unknown_id` | relay | A `grant.revoke` named a grant that is not this page's or has no usable token left (it expired, or was revoked elsewhere); the error has no `id`, and names the grant (`for`, `grantId`, above). The library removes that grant from its list. A `member.rename` or `member.remove` named a member that is not in the browser's group, or came from a browser that is not signed in (`for`, `member`). Late `http.response*` messages for a finished or cancelled `id` get no answer: the relay drops them. |
+| `unknown_id` | relay | A `grant.revoke` named a grant that is not this page's or has no usable token left (it expired, or was revoked elsewhere); the error has no `id`, and names the grant (`for`, `grantId`, above). The library removes that grant from its list. A `member.rename` or `member.remove` named a member that is not in the browser's group, or came from a browser that is not signed in (`for`, `member`). A `group.grant.revoke` named a grant that is not the group's, or a `group.*` message came from a browser that is not signed in (`for`, and `grantId`). Late `http.response*` messages for a finished or cancelled `id` get no answer: the relay drops them. |
 | `too_large` | relay | A message exceeded `maxMessageBytes`; the relay answers the AI app with 502. The relay refuses it by its length, without parsing it; the error's `id` is taken from the start of the message (send `type` and `id` first). A frame over four times the largest `maxMessageBytes` of any site closes the socket with 1009 instead. |
 | `rate_limited` | relay | The tab sent more control messages than its budget: every message except `pong` and `http.response*` counts, 30 at once, then 2 a second per session. Followed by close 4008. A page sends a handful of these when its dialog opens or its user signs in. |
 | `identity_refused` | relay | An `identity` assertion was refused (bad signature, type, issuer, audience, expiry, a reused `jti`), or `identity`/`identity.logout` came on a site without identity binding. |
-| `store_unavailable` | relay | A `grant.revoke`, `grants.revokeAll`, `identity.logout`, `signin.out`, `member.rename` or `member.remove` failed because the relay's token store failed (for `identity.logout` the binding and the requests in flight end anyway). Nothing was wrong with the message; the session stays, and the tab may send it again later. Relays up to 0.9 answered `bad_message`. |
+| `store_unavailable` | relay | A `grant.revoke`, `grants.revokeAll`, `identity.logout`, `signin.out`, `member.rename`, `member.remove`, `group.mode` or `group.grant.revoke` failed because the relay's token store failed (for `identity.logout` the binding and the requests in flight end anyway). Nothing was wrong with the message; the session stays, and the tab may send it again later. Relays up to 0.9 answered `bad_message`. |
 | `app_not_allowed` | relay | The relay's configuration does not let the page's origin serve the app named in `hello.app.id`: the app is reserved for other origins, or the origin's site lists other apps ([`sites[].apps`](configuration.md#sites)). Followed by close 1008, before a session exists. The library reports it as `policy` and does not reconnect by itself. |
 
 Failures of an MCP request inside the tab are not protocol errors: the tab answers with
@@ -544,6 +678,10 @@ WebSocket protocol pings, so proxies keep the connection open.
 | Sign-in starts per session / per network | 5, then 1 every 30 s / 20, then 1 every 30 s | relay (`signin.failed` `rate_limited`) |
 | Open sign-ins | 1 per session, 3 not yet opened per network, 10 000 in all, 10 minutes each | relay (`signin.failed` `rate_limited`, `busy`) |
 | Members per group | 16 | relay (`signin.failed` `group_full`) |
+| `focus` messages per session | 20, then 2 a second | relay (dropped) |
+| A member's answer to a group's `list_tabs` | 15 s | relay (listed without its tabs) |
+| Tabs in a group's `list_tabs` | 256 KiB, 100 per member | relay (counted in `more`) |
+| Requests waiting for a group's member | 64 per group | relay (answered at once) |
 
 All are configurable on the relay; see [configuration](configuration.md). The
 [threat model](threat-model.md) explains why each exists.
