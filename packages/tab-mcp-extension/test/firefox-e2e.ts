@@ -310,9 +310,11 @@ export async function waitForTools(
 export const OWN_TOOLS = [
 	"go_back",
 	"go_forward",
+	"list_tabs",
 	"navigate",
 	"page_info",
 	"reload",
+	"use_tab",
 	"webmcp_call",
 	"webmcp_tools",
 ];

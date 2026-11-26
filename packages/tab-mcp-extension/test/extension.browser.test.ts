@@ -491,9 +491,11 @@ async function waitForTools(
 const OWN_TOOLS = [
 	"go_back",
 	"go_forward",
+	"list_tabs",
 	"navigate",
 	"page_info",
 	"reload",
+	"use_tab",
 	"webmcp_call",
 	"webmcp_tools",
 ];
@@ -2734,7 +2736,7 @@ describe.skipIf(chrome === undefined)(
 					).toEqual({
 						name: "tab-mcp browser extension",
 						apps: [TEST_APP],
-						whileInFront: true,
+						whileInFront: false,
 					});
 					await stack.panel.waitFor(
 						`!document.getElementById("tab-library").hidden`,

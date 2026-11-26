@@ -1728,8 +1728,10 @@ describe("PageToolBridge", () => {
 		const bridge = new PageToolBridge(reg, chrome);
 		await bridge.refresh();
 		let cancelled = false;
+		let reached = false;
 		state.answer = (signal) =>
 			new Promise(() => {
+				reached = true;
 				signal.addEventListener("abort", () => {
 					cancelled = true;
 				});
@@ -1738,9 +1740,21 @@ describe("PageToolBridge", () => {
 		const running = reg.tools
 			.get("page_slow")
 			?.execute({}, options(controller.signal));
+		// Once the call reached the page (the tool checks first that its tab
+		// is still the one calls go to).
+		while (!reached) await Bun.sleep(1);
 		controller.abort();
 		await expect(Promise.resolve(running)).rejects.toThrow("cancelled");
 		expect(cancelled).toBe(true);
+		// Cancelled before it reached the page: the page gets no call at all.
+		reached = false;
+		const before = new AbortController();
+		const early = reg.tools
+			.get("page_slow")
+			?.execute({}, options(before.signal));
+		before.abort();
+		await expect(Promise.resolve(early)).rejects.toThrow("cancelled");
+		expect(reached).toBe(false);
 	});
 
 	test("stop unregisters everything, and a refresh after it changes nothing", async () => {

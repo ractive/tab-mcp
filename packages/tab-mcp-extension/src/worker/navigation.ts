@@ -1,7 +1,8 @@
 /**
  * The navigation tools (iteration 27, DEC-121): `navigate`, `go_back`,
- * `go_forward` and `reload`, for the tab in front, and only while the
- * extension may read it. Within the page's origin they run at once (a link
+ * `go_forward` and `reload`, for the tab AI apps work in (the tab in front,
+ * or the pinned tab, `targets.ts`) or the tab a `tab` argument names, and
+ * only while the extension may read it. Within the page's origin they run at once (a link
  * on the page could do the same, and Chrome keeps the extension's access
  * there); to another origin they ask the user first, with Allow and Don't
  * allow only, since a page's result could tell the AI app to go anywhere.
@@ -24,6 +25,7 @@ import {
 	MAX_QUESTIONS_PER_APP,
 	QUESTION_TIMEOUT_MS,
 } from "./questions.ts";
+import { TAB_ARGUMENT, tabOf } from "./tools.ts";
 
 /** A navigation that has not loaded in this time answers that it is still loading. */
 export const LOAD_TIMEOUT_MS = 30_000;
@@ -241,8 +243,13 @@ export function hostEnd(host: string): string {
 
 /** What the navigation tools need from Chrome. */
 export interface NavigationChrome {
-	/** The tab in front. */
-	current(): Promise<TargetTab>;
+	/**
+	 * The tab a call goes to: the one `tab` names, else the tab AI apps work
+	 * in, pinned now in mode "a pinned tab" without a pin (`Targets.forCall`).
+	 */
+	target(tab?: string): Promise<TargetTab>;
+	/** The same without pinning, to check after a question (`Targets.peek`). */
+	current(tab?: string): Promise<TargetTab>;
 	/** Tab `tabId` now (its address empty where Chrome hides it), `undefined` if closed. */
 	tab(tabId: number): Promise<TargetTab | undefined>;
 	/** The page in `tab`; throws `page_info`'s access message if it may not be read. */
@@ -400,7 +407,8 @@ async function navigation(
 	ask: AskNavigation,
 	refresh: () => Promise<void>,
 ): Promise<NavigationResult> {
-	const tab = await chrome.current();
+	const named = tabOf(args);
+	const tab = await chrome.target(named);
 	// Only a tab the extension may read now: this throws page_info's message.
 	await chrome.page(tab);
 	const from = httpOrigin(tab.url);
@@ -418,34 +426,37 @@ async function navigation(
 		throw new Error(
 			"The tab went to another page meanwhile; it was not navigated. page_info says which page it is now.",
 		);
-	// Still the tab in front: the user may have switched tabs while asked,
-	// and the tools act on the tab in front only (DEC-121).
-	if (!(await inFront(chrome, tab.id)))
+	// Still the tab the call is for: the user may have switched tabs while
+	// asked, or another tab was pinned, and the tools act on the tab AI apps
+	// work in only (DEC-121). A tab argument names the same tab throughout.
+	if (!(await stillTarget(chrome, named, tab.id)))
 		throw new Error(
-			"The tab in front changed meanwhile; it was not navigated. page_info says which page is in front now.",
+			"The tab AI apps work in changed meanwhile (another tab came to the front, or was pinned); it was not navigated. page_info says which page that is now.",
 		);
 	const loaded = await chrome.go(tab.id, target.step, options.signal);
 	if (loaded === "closed") throw new Error("The tab was closed.");
 	// The new page's page_<name> tools are offered before the answer.
 	await refresh().catch(() => {});
-	// The answer and those tools describe the same tab: the one in front.
-	if (!(await inFront(chrome, tab.id)))
+	// The answer and those tools describe the same tab: the one AI apps
+	// work in.
+	if (!(await stillTarget(chrome, named, tab.id)))
 		return {
 			readable: false,
 			reason:
-				"The tab was navigated, but another tab is in front now; page_info says which page that is.",
+				"The tab was navigated, but AI apps work in another tab now; page_info says which page that is.",
 			...(loaded === "timeout" ? { loading: true as const } : {}),
 		};
 	return readAfter(chrome, tab.id, loaded);
 }
 
-/** Tab `tabId` is the tab in front (none in front: it is not). */
-async function inFront(
+/** Tab `tabId` is still the tab the call goes to (none: it is not). */
+async function stillTarget(
 	chrome: NavigationChrome,
+	tab: string | undefined,
 	tabId: number,
 ): Promise<boolean> {
 	try {
-		return (await chrome.current()).id === tabId;
+		return (await chrome.current(tab)).id === tabId;
 	} catch {
 		return false;
 	}
@@ -467,7 +478,7 @@ export function navigationTools(
 	const annotations = { readOnlyHint: false, untrustedContentHint: true };
 	const noInput = {
 		type: "object",
-		properties: {},
+		properties: { tab: TAB_ARGUMENT },
 		additionalProperties: false,
 	} as const;
 	const run =
@@ -478,7 +489,7 @@ export function navigationTools(
 		{
 			name: "navigate",
 			title: "Open an address in the tab",
-			description: `Opens an http(s) address in the tab in front (the page page_info reads), for example a page a tool's result points to. Waits until it has loaded and returns its page_info. ${SAME_ORIGIN}`,
+			description: `Opens an http(s) address in the tab AI apps work in (the page page_info reads) or in the tab the tab argument names, for example a page a tool's result points to. Waits until it has loaded and returns its page_info. ${SAME_ORIGIN}`,
 			inputSchema: {
 				type: "object",
 				properties: {
@@ -486,8 +497,9 @@ export function navigationTools(
 						type: "string",
 						maxLength: MAX_URL,
 						description:
-							'An http or https address, or one relative to the page in front ("/sale").',
+							'An http or https address, or one relative to the page in the tab ("/sale").',
 					},
+					tab: TAB_ARGUMENT,
 				},
 				required: ["url"],
 				additionalProperties: false,
@@ -499,7 +511,7 @@ export function navigationTools(
 			name: "go_back",
 			title: "Back",
 			description:
-				"Goes back one page in the tab in front, as the browser's Back button does, and returns the page's page_info once it has loaded. Back to another origin asks the user first.",
+				"Goes back one page in the tab AI apps work in (or the tab the tab argument names), as the browser's Back button does, and returns the page's page_info once it has loaded. Back to another origin asks the user first.",
 			inputSchema: noInput,
 			annotations,
 			execute: run("back", "go_back"),
@@ -508,7 +520,7 @@ export function navigationTools(
 			name: "go_forward",
 			title: "Forward",
 			description:
-				"Goes forward one page in the tab in front, as the browser's Forward button does, and returns the page's page_info once it has loaded. Forward to another origin asks the user first.",
+				"Goes forward one page in the tab AI apps work in (or the tab the tab argument names), as the browser's Forward button does, and returns the page's page_info once it has loaded. Forward to another origin asks the user first.",
 			inputSchema: noInput,
 			annotations,
 			execute: run("forward", "go_forward"),
@@ -517,7 +529,7 @@ export function navigationTools(
 			name: "reload",
 			title: "Reload the page",
 			description:
-				"Reloads the page in the tab in front and returns its page_info once it has loaded: for a page that shows old content or whose tools did not show up. What the user typed into the page and did not save is lost.",
+				"Reloads the page in the tab AI apps work in (or the tab the tab argument names) and returns its page_info once it has loaded: for a page that shows old content or whose tools did not show up. What the user typed into the page and did not save is lost.",
 			inputSchema: noInput,
 			annotations,
 			execute: run("reload", "reload"),

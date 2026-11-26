@@ -5945,3 +5945,56 @@ Against the draft of 24 November 2026 (`registerTool` steps, WebIDL of
 - **Not here:** the tab-mcp browser extension's own `document.modelContext` (Firefox,
   Chrome without WebMCP) copies Chrome 156, not the draft; moving it to the draft is its
   own change.
+
+## DEC-230: Where a call goes in one browser: the tab in front or a pinned tab; list_tabs only names tabs the extension may read
+
+2026-11-26, iteration 53, its first pull request: the extension alone, a browser without
+sign-in (the owner decided the mode, `list_tabs`, `use_tab` and the `tab` argument in
+DEC-229; the rest here follows from it).
+
+- **Mode:** one setting per browser, "the tab in front" (the default: exactly the
+  behaviour before) or "a pinned tab". In the second, the first call without a pin pins
+  the tab in front at that moment, a `page_<name>` call pins the tab it was offered from,
+  and later calls go to the pinned tab wherever the user is. Back to "the tab in front"
+  drops the pin; to "a pinned tab" pins at the next call. `use_tab` and the panel's
+  "Work here" pin a tab, and in mode "the tab in front" switch the mode too (DEC-229).
+- **A pinned tab that was closed** (or moved out of a normal window) fails every call
+  without `tab` with that reason and the hint to call `list_tabs`; the pin stays until a
+  tab is pinned again or the mode changes, so a second call does not land in the tab in
+  front either. `webmcp_tools` without `tab` answers empty with that reason, as for any
+  tab it cannot read.
+- **The `tab` argument** (a string, an id from `list_tabs`; the browser's tab id in
+  decimal now, `<member>:<tab>` for a group later) on `page_info`, `webmcp_tools`,
+  `webmcp_call`, `navigate`, `go_back`, `go_forward` and `reload` always wins and never
+  moves the pin. `webmcp_tools` and `webmcp_call` for a tab whose tools are not offered
+  read that tab for the one call and keep the offered `page_<name>` tools those of the
+  target. Every rule of a call holds for the tab it goes to: the questions, "Always
+  allow" per site, the vouch and the claim, the navigation questions, the limits. A
+  navigation checks after its question that the tab is still the call's (the target, or
+  the one `tab` named), as it checked the tab in front before (DEC-121).
+- **What `list_tabs` gives (privacy):** only tabs of normal windows the extension may
+  read, the rule of `page_info`: the browser shows the extension an address only for a
+  tab it has host access to or the user clicked its icon on (no `tabs` permission), and
+  of those only http(s) pages that are not the add-on store's. For each, the id, title,
+  address (cut to 200 and 2048 characters, at most 100 tabs), whether it is in front and
+  whether it is pinned. Of every other tab only the count, without title or address:
+  an AI app learns no more about the user's other tabs than that they exist. `use_tab`
+  and `tab` refuse a tab the extension may not read with `page_info`'s reason. With
+  access to all sites `list_tabs` gives the titles and addresses of every http(s) tab;
+  that is what access to all sites means, and the privacy policy says it.
+- **Where it is kept:** the mode and the pin (a tab id, nothing of its page) in the
+  worker's IndexedDB (`aiTarget`), behind a `TargetStore` that the relay's group record
+  can replace later. A browser start forgets the pin, not the mode: the browser's tab
+  ids start anew, and an old pin could name another tab.
+- **The panel:** the card of the tab in front ends with "AI apps work in: the tab in
+  front" or "AI apps work in: <title> (pinned)" (a line, no tooltip, DEC-160) and "Work
+  here" for a readable tab that is not the pinned one; at the card's end, so that its
+  changes move nothing that allows something. "Work here" pins only the tab the panel
+  shows, and like the switches it takes no click for 750 ms after it came, the tab
+  changed, the target changed or it moved (ES 5). The setting is a choice under
+  Settings. With a pinned tab elsewhere, the card still lists the tab in front's tools
+  (a read for the panel only) with their "Always allow" switches.
+- **Pages with the client library** are told `whileInFront: false`: an AI app can reach
+  a tab that is not in front in either mode (a `tab` argument), so "while this tab is in
+  front" would no longer be true. The client library is unchanged (it reads the flag).
+- **Not here:** sign-in and groups (the relay's part of iteration 53).

@@ -766,6 +766,16 @@ like any other, `chrome-extension://<id>` (A11).
   http(s) pages, no `file:` pages and no Incognito tabs. The page's address goes to the
   AI app (`page_info`, navigation results) with its query and fragment, without a
   question, so a token in a link (a magic link, an OAuth callback) goes with it.
+- **Which tab (DEC-230).** Calls go to the tab in front, or, if the user chose "a pinned
+  tab" (or the AI app called `use_tab`), to the pinned tab wherever the user is; a
+  call's `tab` argument reaches any other tab the extension may read. `list_tabs`
+  gives the AI app the address and title of every tab the extension may read (all of
+  them with "Give access to all sites"), not only the one in front, and of the others
+  only how many there are: the extension has no `tabs` permission, so the browser gives
+  it nothing of a tab it may not read, and `use_tab` and `tab` refuse such a tab as
+  `page_info` does. A pinned tab that was closed fails the call; nothing goes to
+  another tab instead. The rules of every call are those of the tab it goes to: the
+  questions, "Always allow" per site, the navigation questions.
 - **Navigation.** `navigate`, `go_back`, `go_forward` and `reload` act only on a tab the
   extension may read. A page's text could tell the AI app to open another site: on the
   page's own origin a navigation runs without asking (as a link on the page would), to

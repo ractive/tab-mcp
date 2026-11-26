@@ -92,8 +92,12 @@ export interface ExtensionState {
 	on: boolean;
 	/** The AI apps connected now (none while not `on`). */
 	apps: AppView[];
-	/** It serves the tab in front of a window only. */
-	whileInFront: true;
+	/**
+	 * It serves the tab in front of a window only. No longer so since
+	 * iteration 53 (DEC-230): a pinned tab, or a call's `tab` argument,
+	 * reaches a tab that is not in front, so the worker says `false`.
+	 */
+	whileInFront: boolean;
 }
 
 /**

@@ -36,13 +36,43 @@ Privacy policy: [PRIVACY.md](PRIVACY.md).
 
 | Tool | What it does |
 |---|---|
-| `page_info` | The tab in front: address (with its query and fragment), title, language, whether WebMCP is available on the page and how many tools it registered. Read-only; its text is the page's own (untrusted). |
+| `page_info` | The tab AI apps work in (below): address (with its query and fragment), title, language, whether WebMCP is available on the page and how many tools it registered. Read-only; its text is the page's own (untrusted). |
 | `webmcp_tools` | The page's WebMCP tools: each one's `page_<name>`, title, description, input schema (what `webmcp_call` checks the arguments against; 192 KB of schemas together at most, past that a tool says where its schema is), whether it only reads, whether it is destructive (as its `page_<name>` tool's hint), and why a tool is left out; empty with the reason when the tab has none or may not be read. |
-| `page_<name>` | One per tool the page in front registered. The list follows the tab in front and the page's `toolchange`. Its hints for the AI app: `readOnlyHint` as the page marks it; `destructiveHint` false for a read-only tool, else as the page's `consequentialHint`, and true when a page that registers its tools with WebMCP itself gave the tool no annotations at all (nothing known). A page built with the tab-mcp client library always gives them: a tool without hints is not consequential there, so not destructive. The hint only describes the tool: every tool that is not read-only asks you all the same. |
-| `webmcp_call` | Calls a tool of the page in front by its name, with the same rules. For AI apps that read their tool list once (Claude, Codex): a `page_<name>` tool that came with a later tab is not in their list, but `webmcp_call` reaches it. |
-| `navigate` | Opens an http(s) address (or one relative to the page, `/sale`) in the tab in front, waits until it has loaded and answers with its `page_info`. |
+| `page_<name>` | One per tool the page in the tab AI apps work in registered. The list follows that tab and the page's `toolchange`. They take no `tab` argument (it could clash with the page's own arguments). Its hints for the AI app: `readOnlyHint` as the page marks it; `destructiveHint` false for a read-only tool, else as the page's `consequentialHint`, and true when a page that registers its tools with WebMCP itself gave the tool no annotations at all (nothing known). A page built with the tab-mcp client library always gives them: a tool without hints is not consequential there, so not destructive. The hint only describes the tool: every tool that is not read-only asks you all the same. |
+| `webmcp_call` | Calls a tool of the page by its name, with the same rules. For AI apps that read their tool list once (Claude, Codex): a `page_<name>` tool that came with a later tab is not in their list, but `webmcp_call` reaches it; with `tab`, so do the tools of another tab. |
+| `navigate` | Opens an http(s) address (or one relative to the page, `/sale`) in the tab, waits until it has loaded and answers with its `page_info`. |
 | `go_back`, `go_forward` | Back or forward one page in that tab, as the browser's buttons do, with the new page's `page_info`. |
 | `reload` | Reloads the page in that tab, with its `page_info`. |
+| `list_tabs` | The tabs the extension may read (a click on its icon there, or "Give access to all sites"), in the browser's normal windows: each one's id, title and address (the pages' own text, cut to 200 and 2048 characters, at most 100 tabs), which one is in front and which one is pinned, and where calls without `tab` go. Of every other tab only how many there are: the browser gives the extension no address or title of a tab it may not read, and the AI app gets none. Read-only. |
+| `use_tab` | Pins a tab from `list_tabs`: calls without `tab` go there from now on, wherever you are. With "AI apps work in: the tab in front" it pins all the same and switches that setting to "a pinned tab" (the panel shows it): a request the AI app makes on purpose does not fail on a setting it cannot see. Only a tab the extension may read now, else it fails with `page_info`'s reason. Answers with the tab's `page_info`. |
+
+Every tool above that acts on a tab but `list_tabs` and `use_tab` takes an optional `tab`
+argument, a tab's id from `list_tabs` (a string): the call goes to that tab, whatever the
+setting, and the pin stays where it is. The `page_<name>` tools cannot take it. The
+extension's MCP server keeps no state per conversation, so the tool descriptions ask the
+AI to pass `tab` with every call after `list_tabs` or `use_tab`: two conversations of one
+AI app then keep to their own tabs, while the pin is one for the browser.
+
+### Where calls go (DEC-230)
+
+"AI apps work in" under Settings, one setting for the browser:
+
+- **the tab in front** (the default, as before): calls go to the active tab of the window
+  you used last.
+- **a pinned tab**: the first call pins the tab in front at that moment; later calls go
+  to that tab wherever you are, and switching tabs moves nothing. "Work here" in the
+  card of the tab in front pins that tab, as `use_tab` does. A pinned tab that was
+  closed makes every call fail with that reason and the hint to call `list_tabs`; no
+  call goes to another tab by itself. Back to "the tab in front" drops the pin.
+
+The card of the tab in front ends with a line that says where calls go now ("AI apps work
+in: the tab in front", "AI apps work in: Shop (pinned)") and, for a tab the extension may
+read that is not the pinned one, "Work here". Like the switches that allow something, it
+takes no click for 750 ms after it came, the tab changed or it moved. With a tab pinned,
+the card still lists the tools of the tab in front (read for the panel), with their
+"Always allow" switches. A browser start forgets the pin (the browser's tab ids start
+anew), not the setting. A page with the tab-mcp client library is no longer told that the
+extension serves only the tab in front (`whileInFront: false`).
 
 The navigation tools act only on a tab the extension may read now (a click on its icon
 there, or "Give access to all sites"); on any other tab they do nothing and say why:

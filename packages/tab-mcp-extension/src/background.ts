@@ -146,6 +146,11 @@ const sync = () =>
 	);
 chrome.runtime.onInstalled.addListener(sync);
 chrome.runtime.onStartup.addListener(sync);
+// A browser start gives its tabs new ids: the pinned tab's id is no tab's
+// any more, or another's (DEC-230).
+chrome.runtime.onStartup.addListener(() =>
+	withConnection((c) => c.browserStarted()),
+);
 
 /**
  * Firefox, after an install, reload or update: the content script into every
@@ -192,15 +197,18 @@ chrome.tabs.onActivated.addListener(tabChanged);
 chrome.tabs.onRemoved.addListener((tabId) =>
 	withConnection((c) => c.tabClosed(tabId)),
 );
-chrome.tabs.onUpdated.addListener((_id, change, tab) => {
-	// Only the active tabs, and only once a page has loaded: mid-navigation
-	// there is nothing to read, and the click's grant may be on its way out.
-	if (tab.active && change.status === "complete") tabChanged();
+chrome.tabs.onUpdated.addListener((id, change, tab) => {
+	// Only the active tabs and the pinned one, and only once a page has
+	// loaded: mid-navigation there is nothing to read, and the click's grant
+	// may be on its way out.
+	if (change.status === "complete")
+		withConnection((c) => c.pageChanged(id, tab.active));
 });
 chrome.windows.onFocusChanged.addListener(tabChanged);
 
 // Content scripts may say only this: the page's tools changed (`toolchange`)
-// in an active tab, or the page announced the client library and asks what
+// (it counts in an active tab or the pinned one), or the page announced the
+// client library and asks what
 // the extension tells such a page (DEC-207). Commands come only over the
 // side panel's port.
 chrome.runtime.onMessage.addListener(
@@ -212,11 +220,10 @@ chrome.runtime.onMessage.addListener(
 			);
 			return true; // answers asynchronously
 		}
-		if (
-			isContentEvent(message, sender, chrome.runtime.id) &&
-			sender.tab?.active
-		)
-			tabChanged();
+		const id = sender.tab?.id;
+		const active = sender.tab?.active === true;
+		if (isContentEvent(message, sender, chrome.runtime.id) && id !== undefined)
+			withConnection((c) => c.pageChanged(id, active));
 		return false;
 	},
 );

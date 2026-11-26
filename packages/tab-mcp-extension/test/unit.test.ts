@@ -246,6 +246,7 @@ describe("page_info", () => {
 				state: { available: false, tools: [] },
 				refresh: async () => {},
 				callByName: async () => undefined,
+				stateOf: async () => ({ available: false, tools: [] }),
 			}),
 		);
 		expect(tool?.name).toBe("page_info");
