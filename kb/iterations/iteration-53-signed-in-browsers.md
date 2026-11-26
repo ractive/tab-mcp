@@ -65,8 +65,12 @@ Decided in the conversation (DEC-229):
 | Microsoft | OpenID Connect, multi-tenant (`/common`) | `tid` + `oid` | the issuer names the tenant: check it as `https://login.microsoftonline.com/{tid}/v2.0` with the token's own `tid`; `sub` differs per app, `oid` does not. Personal and Entra ID work accounts. |
 | GitHub | OAuth 2.0, no OpenID Connect | numeric `id` from `GET https://api.github.com/user` | a small module of its own in the relay (no ID token to verify): code for access token, one `GET /user`, the token discarded; the login name can change, so it is not the key |
 
-Scopes: `openid email profile` (Microsoft, Google); none at GitHub, where `GET /user`
-returns the public profile with the `id` without one. Nothing more.
+Scopes: Microsoft `openid profile` (`profile` puts `oid` and `preferred_username` into the
+ID token; `email` is left out: the relay keeps no address, and Entra ID's `email` claim
+is optional and often missing), Google `openid email` (the address is what the panel
+shows), none at GitHub, where `GET /user` returns the public profile with the `id`
+without one. Nothing more. What the panel shows as "Signed in as …": Microsoft's
+`preferred_username`, Google's `email`, GitHub's login name.
 
 One callback for every provider and both flows (a browser's sign-in, an AI app's):
 `https://<relay>/authorize/callback`, as `oidc.ts` has it; the flow's `state` says which
