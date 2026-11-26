@@ -2,6 +2,7 @@ import type {
 	BindingRecord,
 	BindingSelector,
 	GrantSummary,
+	GroupMode,
 	RevokeOptions,
 	RevokeSelector,
 	TokenRecord,
@@ -94,6 +95,8 @@ export class MemoryTokenStore implements TokenStore {
 	readonly #revokedAddresses = new Map<string, { at: number; until: number }>();
 	/** Browsers' sign-ins by address id (DEC-231). */
 	readonly #bindings = new Map<string, BindingRecord>();
+	/** Groups' modes (DEC-232). */
+	readonly #modes = new Map<string, GroupMode>();
 
 	async put(record: TokenRecord): Promise<boolean> {
 		if (this.#revokedGrants.has(record.grantId)) return false;
@@ -162,6 +165,10 @@ export class MemoryTokenStore implements TokenStore {
 		this.#nonces.sweep(now);
 		for (const [id, b] of this.#bindings) {
 			if (b.expiresAt <= now) this.#bindings.delete(id);
+		}
+		const groups = new Set([...this.#bindings.values()].map((b) => b.group));
+		for (const group of this.#modes.keys()) {
+			if (!groups.has(group)) this.#modes.delete(group);
 		}
 		let n = 0;
 		for (const [hash, r] of this.#records) {
@@ -250,7 +257,16 @@ export class MemoryTokenStore implements TokenStore {
 		return undefined;
 	}
 
+	async getGroupMode(group: string): Promise<GroupMode | undefined> {
+		return this.#modes.get(group);
+	}
+
+	async setGroupMode(group: string, mode: GroupMode): Promise<void> {
+		this.#modes.set(group, mode);
+	}
+
 	async close(): Promise<void> {
+		this.#modes.clear();
 		this.#bindings.clear();
 		this.#nonces.clear();
 		this.#records.clear();

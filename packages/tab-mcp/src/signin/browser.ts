@@ -21,7 +21,7 @@
  * online, never their address ids, and nothing of their tabs.
  */
 
-import { shortAddress } from "../address.ts";
+import { groupAddress, shortAddress } from "../address.ts";
 import { readBodyWithDeadline } from "../body.ts";
 import type { RelayConfig, SignInProviderId } from "../config.ts";
 import { signInAllowed } from "../config.ts";
@@ -33,13 +33,16 @@ import { displayName } from "../oauth/cimd.ts";
 import { escapeHtml, pageHeaders, renderPage } from "../oauth/html.ts";
 import { OidcError } from "../oauth/oidc.ts";
 import {
+	type GrantInfo,
 	type GroupMessage,
+	type GroupMode,
+	type GroupPin,
 	SIGN_IN_CAPABILITY,
 	type SignInFailure,
 	type SignInRedirectError,
 } from "../protocol.ts";
 import { RateLimiter } from "../ratelimit.ts";
-import type { TabSession } from "../session.ts";
+import { clientHost, type TabSession } from "../session.ts";
 import type { BindingRecord, TokenStore } from "../store/types.ts";
 import { newId } from "../tokens.ts";
 import {
@@ -70,6 +73,17 @@ const COMPLETION_TTL_MS = 2 * 60_000;
 const STATE_PREFIX = "browser.";
 /** The label of a member whose browser sent none. */
 const DEFAULT_LABEL = "Browser";
+/**
+ * `focus` messages per member (DEC-232): 20, then two a second. They do
+ * not count against the session's control budget, so switching windows
+ * quickly never ends a session; past this they are dropped.
+ */
+const FOCUS_BURST = 20;
+const FOCUS_PER_SECOND = 2;
+/** Groups whose routing state is kept while none of their members is online. */
+const MAX_IDLE_GROUPS = 10_000;
+/** Requests that wait for a member of one group to come online, at most. */
+const MAX_WAITING_PER_GROUP = 64;
 
 /** What sign-in needs from its relay. */
 export interface SignInHost {
@@ -80,6 +94,15 @@ export interface SignInHost {
 	publicUrl(): string;
 	/** The ready session that holds an address now, if any. */
 	sessionOf(addressId: string): TabSession | undefined;
+	/**
+	 * A group grant ended (DEC-232): its requests in flight on the members'
+	 * sessions end, as a page grant's do, and the members hear of it.
+	 */
+	groupGrantRemoved(
+		group: string,
+		grantId: string,
+		reason: "revoked" | "expired",
+	): void;
 }
 
 type BindingMethods = Pick<
@@ -89,6 +112,8 @@ type BindingMethods = Pick<
 	| "listBindings"
 	| "renameBinding"
 	| "deleteBinding"
+	| "getGroupMode"
+	| "setGroupMode"
 >;
 
 /** Test-only settings (`createTestRelay`). */
@@ -131,6 +156,40 @@ interface Flow {
 	 * link was opened from another network than the session's.
 	 */
 	proceed?: string;
+}
+
+/**
+ * Where a group's calls go (DEC-232): its mode (kept in the store), its pin
+ * (in memory: a relay that restarts forgets it, and the next call in mode
+ * `pinned` pins again), and when each member last had the focus or came
+ * online (the relay's own clock).
+ */
+interface GroupState {
+	mode: GroupMode;
+	/** The mode was read from the store (a failed read is tried again). */
+	loaded: boolean;
+	pin?: GroupPin;
+	/** Member id → when one of its windows last gained the focus (mode `front`). */
+	readonly focusAt: Map<string, number>;
+	/** Member id → when it last came online. */
+	readonly onlineAt: Map<string, number>;
+	/** Member id → label, as the store last listed them. */
+	labels: Map<string, string>;
+	/** The member `group.focus` last named, to announce only a change. */
+	shownFocus?: string | undefined;
+	/** The group's grant ids as last announced, to tell members of a change. */
+	grantIds?: string[];
+}
+
+/** Where a call without a pin goes now (`target`). */
+export interface GroupTarget {
+	session: TabSession;
+	member: string;
+	/**
+	 * Why it is not the browser whose window had the focus last: that one
+	 * is offline (`offline`, with its label), or no member said (`unknown`).
+	 */
+	fallback?: { kind: "offline"; label: string } | { kind: "unknown" };
 }
 
 /** A checked sign-in that waits for its extension's `signin.complete`. */
@@ -205,6 +264,17 @@ export class BrowserSignIn {
 	readonly #unvisited = new Map<string, number>();
 	/** The members' sessions that are online, per group. */
 	readonly #online = new Map<string, Set<TabSession>>();
+	/** Routing state per group (DEC-232); insertion order is last use. */
+	readonly #groups = new Map<string, GroupState>();
+	/** Requests waiting for a member of a group to come online. */
+	readonly #waiters = new Map<string, Set<(stop?: boolean) => void>>();
+	/** The last stamp of a member's focus or coming online: the relay's clock, never twice the same. */
+	#focusClock = 0;
+	readonly #focusPerSession = new RateLimiter({
+		capacity: FOCUS_BURST,
+		refillPerSecond: FOCUS_PER_SECOND,
+		onLimited: () => this.#host.logger.warn("group.focus_limited", {}),
+	});
 	/** Sign-ins a session may start: 5, then one every 30 s. */
 	readonly #startsPerSession = new RateLimiter({
 		capacity: 5,
@@ -250,6 +320,11 @@ export class BrowserSignIn {
 			signInAllowed(this.#host.config, app) &&
 			this.#providers.size > 0
 		);
+	}
+
+	/** The providers, for an AI app's sign-in on the pairing page too (DEC-232). */
+	get providers(): ReadonlyMap<SignInProviderId, SignInProvider> {
+		return this.#providers;
 	}
 
 	/** The providers for `session.signIn`, in the order of the buttons. */
@@ -305,6 +380,8 @@ export class BrowserSignIn {
 			this.#end(session, "removed");
 			return;
 		}
+		await this.#loadMode(member.group);
+		if (!session.ready || session.member !== member) return;
 		this.#join(session, member.group);
 		void this.#announce(member.group);
 	}
@@ -354,6 +431,12 @@ export class BrowserSignIn {
 		const set = this.#online.get(group) ?? new Set();
 		set.add(session);
 		this.#online.set(group, set);
+		const member = session.member?.memberId;
+		if (member !== undefined) {
+			this.#focusClock = Math.max(Date.now(), this.#focusClock + 1);
+			this.#state(group).onlineAt.set(member, this.#focusClock);
+		}
+		for (const wake of [...(this.#waiters.get(group) ?? [])]) wake();
 	}
 
 	/** Whether the session was online in the group. */
@@ -380,9 +463,27 @@ export class BrowserSignIn {
 			});
 			return;
 		}
-		const sessions = [...(this.#online.get(group) ?? [])].filter(
-			(s) => s.ready && s.member?.group === group,
-		);
+		let grants: GrantInfo[];
+		try {
+			grants = (
+				await this.#host.store.listGrants(groupAddress(group), Date.now())
+			).map((g) => ({
+				grantId: g.grantId,
+				client: {
+					id: g.clientId,
+					name: g.clientName,
+					host: clientHost(g.clientId),
+				},
+				createdAt: new Date(g.createdAt).toISOString(),
+			}));
+		} catch (error) {
+			this.#host.logger.error("store.error", {
+				op: "listGrants",
+				...errorFields(error),
+			});
+			return;
+		}
+		const sessions = this.onlineMembers(group);
 		const online = new Set(sessions.map((s) => s.member?.memberId));
 		const members = bindings.map((b) => ({
 			id: b.memberId,
@@ -390,6 +491,12 @@ export class BrowserSignIn {
 			online: online.has(b.memberId),
 			signedInAt: new Date(b.createdAt).toISOString(),
 		}));
+		const state = this.#state(group);
+		state.labels = new Map(bindings.map((b) => [b.memberId, b.label]));
+		state.grantIds = grants.map((g) => g.grantId);
+		const focus =
+			state.mode === "front" ? this.target(group)?.member : undefined;
+		state.shownFocus = focus;
 		for (const s of sessions) {
 			const member = s.member;
 			if (member === undefined) continue;
@@ -400,8 +507,345 @@ export class BrowserSignIn {
 				expiresAt: new Date(member.expiresAt).toISOString(),
 				maxMembers: MAX_MEMBERS,
 				members,
+				mode: state.mode,
+				...(state.mode === "pinned" && state.pin !== undefined
+					? { pin: { ...state.pin } }
+					: {}),
+				...(focus === undefined ? {} : { focus }),
+				grants,
 			};
 			s.send(message);
+		}
+	}
+
+	// The group's routing (DEC-232)
+
+	/** The group's routing state, made on first use; the least recently used idle ones go. */
+	#state(group: string): GroupState {
+		let state = this.#groups.get(group);
+		if (state === undefined) {
+			state = {
+				mode: "front",
+				loaded: false,
+				focusAt: new Map(),
+				onlineAt: new Map(),
+				labels: new Map(),
+			};
+			if (this.#groups.size >= MAX_IDLE_GROUPS + this.#online.size) {
+				for (const key of this.#groups.keys()) {
+					if (this.#online.has(key)) continue;
+					this.#groups.delete(key);
+					break;
+				}
+			}
+		} else {
+			this.#groups.delete(group);
+		}
+		this.#groups.set(group, state);
+		return state;
+	}
+
+	/** Read the group's mode from the store once; a failure leaves `front` and is tried again. */
+	async #loadMode(group: string): Promise<void> {
+		const state = this.#state(group);
+		if (state.loaded) return;
+		try {
+			const mode = await this.#host.store.getGroupMode(group);
+			if (state.loaded) return; // set meanwhile
+			state.loaded = true;
+			if (mode !== undefined) state.mode = mode;
+		} catch (error) {
+			this.#host.logger.error("store.error", {
+				op: "getGroupMode",
+				...errorFields(error),
+			});
+		}
+	}
+
+	/** The members of a group online now, oldest session first. */
+	onlineMembers(group: string): TabSession[] {
+		return [...(this.#online.get(group) ?? [])].filter(
+			(s) => s.ready && s.member?.group === group,
+		);
+	}
+
+	/** The session of one member of a group, if it is online. */
+	memberSession(group: string, member: string): TabSession | undefined {
+		return this.onlineMembers(group).find((s) => s.member?.memberId === member);
+	}
+
+	/**
+	 * The group's members and their labels, as the store lists them (the
+	 * last announcement's while a member is online, else read now).
+	 */
+	async labels(group: string): Promise<Map<string, string>> {
+		const state = this.#state(group);
+		if (state.labels.size > 0 && this.#online.has(group)) return state.labels;
+		const bindings = await this.#host.store.listBindings(group, Date.now());
+		state.labels = new Map(bindings.map((b) => [b.memberId, b.label]));
+		return state.labels;
+	}
+
+	/** The group's mode and pin now (the mode read from the store first). */
+	async routing(group: string): Promise<{ mode: GroupMode; pin?: GroupPin }> {
+		await this.#loadMode(group);
+		const state = this.#state(group);
+		return state.mode === "pinned" && state.pin !== undefined
+			? { mode: state.mode, pin: { ...state.pin } }
+			: { mode: state.mode };
+	}
+
+	/**
+	 * Where a call without a pin goes: the online member whose window had
+	 * the focus last; without one, the member that came online last, with
+	 * the reason. `undefined` when no member is online.
+	 */
+	target(group: string): GroupTarget | undefined {
+		const sessions = this.onlineMembers(group);
+		const first = sessions[0];
+		if (first === undefined) return undefined;
+		const state = this.#state(group);
+		let focused: string | undefined;
+		let at = Number.NEGATIVE_INFINITY;
+		for (const [member, t] of state.focusAt) {
+			if (t > at) {
+				at = t;
+				focused = member;
+			}
+		}
+		const session = sessions.find((s) => s.member?.memberId === focused);
+		if (session !== undefined && focused !== undefined) {
+			return { session, member: focused };
+		}
+		const since = (s: TabSession) =>
+			state.onlineAt.get(s.member?.memberId ?? "") ?? 0;
+		let latest = first;
+		for (const s of sessions) if (since(s) >= since(latest)) latest = s;
+		return {
+			session: latest,
+			member: latest.member?.memberId ?? "",
+			fallback:
+				focused === undefined
+					? { kind: "unknown" }
+					: {
+							kind: "offline",
+							label: state.labels.get(focused) ?? DEFAULT_LABEL,
+						},
+		};
+	}
+
+	/**
+	 * Wait until a member of the group (that member, if named) is online,
+	 * up to `ms`; false if it did not come or the request was aborted.
+	 */
+	waitForMember(
+		group: string,
+		member: string | undefined,
+		signal: AbortSignal,
+		ms: number,
+	): Promise<boolean> {
+		const here = () =>
+			member === undefined
+				? this.onlineMembers(group).length > 0
+				: this.memberSession(group, member) !== undefined;
+		if (here()) return Promise.resolve(true);
+		if (ms <= 0 || signal.aborted) return Promise.resolve(false);
+		const set = this.#waiters.get(group) ?? new Set<(stop?: boolean) => void>();
+		// A waiting request holds its body and a socket, as one waiting for a
+		// page: at most so many per group, and the relay's session cap in all.
+		if (
+			set.size >= MAX_WAITING_PER_GROUP ||
+			this.waitingCount >= this.#host.config.maxSessions
+		) {
+			return Promise.resolve(false);
+		}
+		return new Promise((resolve) => {
+			let timer: Timer | undefined;
+			const done = (found: boolean) => {
+				clearTimeout(timer);
+				signal.removeEventListener("abort", onAbort);
+				set.delete(wake);
+				if (set.size === 0 && this.#waiters.get(group) === set) {
+					this.#waiters.delete(group);
+				}
+				resolve(found);
+			};
+			const wake = (stop = false) => {
+				if (stop || here()) done(!stop && here());
+			};
+			const onAbort = () => done(false);
+			set.add(wake);
+			this.#waiters.set(group, set);
+			timer = setTimeout(() => done(false), ms);
+			signal.addEventListener("abort", onAbort, { once: true });
+		});
+	}
+
+	/** Requests waiting for a member of a group, in all. */
+	get waitingCount(): number {
+		let n = 0;
+		for (const set of this.#waiters.values()) n += set.size;
+		return n;
+	}
+
+	/** End every wait for a group's member (the relay stops). */
+	wakeAll(): void {
+		for (const set of [...this.#waiters.values()]) {
+			for (const wake of [...set]) wake(true);
+		}
+	}
+
+	/**
+	 * Pin a member's tab for the group and switch it to mode `pinned`: an
+	 * AI app's `use_tab` that the member answered without an error, or the
+	 * member's own `group.pin`. Every member hears of it. The mode is saved;
+	 * if that fails, it holds in memory until the relay restarts.
+	 */
+	async pin(group: string, member: string, tab: string): Promise<void> {
+		const state = this.#state(group);
+		const changed = state.mode !== "pinned";
+		state.mode = "pinned";
+		state.pin = { member, tab };
+		state.loaded = true;
+		if (changed) {
+			try {
+				await this.#host.store.setGroupMode(group, "pinned");
+			} catch (error) {
+				this.#host.logger.error("store.error", {
+					op: "setGroupMode",
+					...errorFields(error),
+				});
+			}
+		}
+		this.#host.logger.info("group.pinned", { modeChanged: changed });
+		await this.#announce(group);
+	}
+
+	/** `group.mode`: any member sets the mode; `front` drops the pin. */
+	async setMode(session: TabSession, mode: GroupMode): Promise<void> {
+		const member = session.member;
+		const about = { type: "group.mode" as const, mode };
+		if (member === undefined) {
+			session.refused("unknown_id", "this browser is not signed in", about);
+			return;
+		}
+		try {
+			await this.#host.store.setGroupMode(member.group, mode);
+		} catch (error) {
+			this.#host.logger.error("store.error", {
+				op: "setGroupMode",
+				...errorFields(error),
+			});
+			session.refused("store_unavailable", STORE_TEXT, about);
+			return;
+		}
+		const state = this.#state(member.group);
+		state.loaded = true;
+		state.mode = mode;
+		if (mode === "front") delete state.pin;
+		this.#host.logger.info("group.mode", {
+			address: shortAddress(session.addressId ?? ""),
+			mode,
+		});
+		await this.#announce(member.group);
+	}
+
+	/** `group.pin`: a member pins one of its own tabs ("Work here"). */
+	async pinHere(session: TabSession, tab: string): Promise<void> {
+		const member = session.member;
+		if (member === undefined) {
+			session.refused("unknown_id", "this browser is not signed in", {
+				type: "group.pin",
+				tab,
+			});
+			return;
+		}
+		await this.pin(member.group, member.memberId, tab);
+	}
+
+	/**
+	 * `focus`: one of the member's windows gained the focus. Only in mode
+	 * `front` (members send it only then; in mode `pinned` the relay does
+	 * not want to know), stamped with the relay's clock. A change of the
+	 * member that calls go to is announced.
+	 */
+	focus(session: TabSession): void {
+		const member = session.member;
+		if (member === undefined) return;
+		const state = this.#state(member.group);
+		if (state.mode !== "front") return;
+		if (!this.#focusPerSession.take(session.sessionId)) return;
+		// The relay's clock, strictly increasing: two in one millisecond
+		// keep their order.
+		this.#focusClock = Math.max(Date.now(), this.#focusClock + 1);
+		state.focusAt.set(member.memberId, this.#focusClock);
+		const now = this.target(member.group)?.member;
+		if (now !== state.shownFocus) void this.#announce(member.group);
+	}
+
+	/** `group.grant.revoke`: any member disconnects an AI app from the whole group. */
+	async revokeGroupGrant(session: TabSession, grantId: string): Promise<void> {
+		const member = session.member;
+		const about = { type: "group.grant.revoke" as const, grantId };
+		if (member === undefined) {
+			session.refused("unknown_id", "this browser is not signed in", about);
+			return;
+		}
+		const address = groupAddress(member.group);
+		const now = Date.now();
+		try {
+			const grants = await this.#host.store.listGrants(address, now);
+			if (!grants.some((g) => g.grantId === grantId)) {
+				session.refused("unknown_id", "unknown grant", about);
+				return;
+			}
+			await this.#host.store.revoke(
+				{ grantId },
+				{ now, keepUntil: now + this.#host.config.grantLifetimeMs },
+			);
+		} catch (error) {
+			this.#host.logger.error("store.error", {
+				op: "revokeGroupGrant",
+				...errorFields(error),
+			});
+			session.refused(
+				"store_unavailable",
+				"the relay cannot change grants right now; try again shortly",
+				about,
+			);
+			return;
+		}
+		this.#host.logger.info("oauth.revoked", {
+			address: shortAddress(address),
+			by: "member",
+		});
+		this.#host.groupGrantRemoved(member.group, grantId, "revoked");
+	}
+
+	/** A group's grants changed (one added or removed): its members hear of it. */
+	grantsChanged(group: string): void {
+		if (this.#online.has(group)) void this.#announce(group);
+	}
+
+	/**
+	 * The sweep's part for group grants: a grant whose tokens all ran out
+	 * ends for the group, with its requests in flight, and the members get
+	 * `group` without it.
+	 */
+	async sweepGroupGrants(now: number): Promise<void> {
+		for (const group of [...this.#online.keys()]) {
+			const known = this.#groups.get(group)?.grantIds;
+			if (known === undefined || known.length === 0) continue;
+			const live = new Set(
+				(await this.#host.store.listGrants(groupAddress(group), now)).map(
+					(g) => g.grantId,
+				),
+			);
+			for (const grantId of known) {
+				if (!live.has(grantId)) {
+					this.#host.groupGrantRemoved(group, grantId, "expired");
+				}
+			}
 		}
 	}
 
@@ -979,6 +1423,8 @@ export class BrowserSignIn {
 			return true;
 		}
 		session.member = membership(record);
+		await this.#loadMode(record.group);
+		if (!session.ready || session.member?.group !== record.group) return true;
 		this.#join(session, record.group);
 		this.#host.logger.info("signin.bound", {
 			address: shortAddress(addressId),
@@ -1073,6 +1519,7 @@ export class BrowserSignIn {
 	 */
 	sweep(now: number): void {
 		this.#sweep(now);
+		this.#focusPerSession.sweep(now);
 		for (const [group, set] of [...this.#online]) {
 			let changed = false;
 			for (const s of [...set]) {

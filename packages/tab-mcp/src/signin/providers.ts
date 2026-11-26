@@ -56,6 +56,11 @@ export interface SignInProvider {
 	readonly name: string;
 	/** The provider's authorization URL for this flow (PKCE S256, state, nonce). */
 	authorizationUrl(flow: FlowSecrets): Promise<string>;
+	/**
+	 * The origin of the provider's authorization endpoint, for a page whose
+	 * form leads there (CSP `form-action`); throws if it cannot be known.
+	 */
+	authorizationOrigin(): Promise<string>;
 	/** The account behind the callback's code; throws `OidcError` with a reason. */
 	complete(code: string, flow: FlowSecrets): Promise<SignInAccount>;
 }
@@ -156,6 +161,10 @@ class OidcSignIn implements SignInProvider {
 			// The account chooser, so a browser can sign in with another account.
 			prompt: "select_account",
 		});
+	}
+
+	async authorizationOrigin(): Promise<string> {
+		return new URL((await this.#discovery.get()).authorizationEndpoint).origin;
 	}
 
 	async complete(code: string, flow: FlowSecrets): Promise<SignInAccount> {
@@ -271,6 +280,10 @@ class GitHubSignIn implements SignInProvider {
 			allow_signup: "false",
 			prompt: "select_account",
 		});
+	}
+
+	async authorizationOrigin(): Promise<string> {
+		return new URL(this.#origin).origin;
 	}
 
 	async complete(code: string, flow: FlowSecrets): Promise<SignInAccount> {

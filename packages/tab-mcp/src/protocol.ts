@@ -159,6 +159,16 @@ export interface GroupMember {
 	/** When the member signed in. */
 	signedInAt: string;
 }
+/**
+ * Where a group's calls go without a `tab` argument (DEC-232): the tab in
+ * front of the browser whose window had the focus last, or a pinned tab.
+ */
+export type GroupMode = "front" | "pinned";
+/** The group's pinned tab: a member and the id of a tab in it, as its `list_tabs` gives it. */
+export interface GroupPin {
+	member: string;
+	tab: string;
+}
 /** The group's state, to every member when it changes and when a member connects. */
 export interface GroupMessage {
 	type: "group";
@@ -170,6 +180,17 @@ export interface GroupMessage {
 	maxMembers: number;
 	/** Every member, oldest first, this browser included. */
 	members: GroupMember[];
+	/** Where calls without a `tab` argument go (DEC-232). */
+	mode: GroupMode;
+	/** Mode `pinned`: the pinned tab, once there is one. */
+	pin?: GroupPin;
+	/**
+	 * Mode `front`: the member calls without `tab` go to now (its window had
+	 * the focus last, or it is the one online longest ago … see protocol.md).
+	 */
+	focus?: string;
+	/** The AI apps connected to the whole group (group grants), oldest first. */
+	grants: GrantInfo[];
 }
 export interface PingMessage {
 	type: "ping";
@@ -256,7 +277,10 @@ export type ErrorAnswers =
 	| "identity.logout"
 	| "signin.out"
 	| "member.rename"
-	| "member.remove";
+	| "member.remove"
+	| "group.mode"
+	| "group.pin"
+	| "group.grant.revoke";
 export type RelayMessage =
 	| SessionMessage
 	| PingMessage
@@ -332,6 +356,26 @@ export interface MemberRemoveMessage {
 	type: "member.remove";
 	member: string;
 }
+/** Set the group's mode (DEC-232); every member then gets `group`. */
+export interface GroupModeMessage {
+	type: "group.mode";
+	mode: GroupMode;
+}
+/** Pin a tab of this browser for the group ("Work here", or the first call in mode `pinned`). */
+export interface GroupPinMessage {
+	type: "group.pin";
+	/** The tab's id as this browser's `list_tabs` gives it (decimal). */
+	tab: string;
+}
+/** Disconnect one AI app from the whole group. */
+export interface GroupGrantRevokeMessage {
+	type: "group.grant.revoke";
+	grantId: string;
+}
+/** A window of this browser gained the focus (mode `front` only); no URL, no title. */
+export interface FocusMessage {
+	type: "focus";
+}
 export interface PongMessage {
 	type: "pong";
 	t: number;
@@ -401,6 +445,10 @@ export type TabMessage =
 	| SignInOutMessage
 	| MemberRenameMessage
 	| MemberRemoveMessage
+	| GroupModeMessage
+	| GroupPinMessage
+	| GroupGrantRevokeMessage
+	| FocusMessage
 	| PongMessage
 	| ByeMessage
 	| HttpResponseMessage
@@ -464,8 +512,9 @@ function idOf(v: Json): string | undefined {
 
 export interface ParseOptions {
 	/**
-	 * The session offers sign-in (DEC-231): `signin.*` and `member.*` are
-	 * messages. Otherwise they are unknown types, as for a relay without them.
+	 * The session offers sign-in (DEC-231): `signin.*`, `member.*`, `group.*`
+	 * and `focus` are messages. Otherwise they are unknown types, as for a
+	 * relay without them.
 	 */
 	signIn?: boolean;
 }
@@ -477,7 +526,14 @@ const SIGN_IN_TYPES: ReadonlySet<string> = new Set([
 	"signin.out",
 	"member.rename",
 	"member.remove",
+	"group.mode",
+	"group.pin",
+	"group.grant.revoke",
+	"focus",
 ]);
+
+/** A tab id as a browser's `list_tabs` gives it (DEC-230): 1-15 decimal digits. */
+export const TAB_ID: RegExp = /^\d{1,15}$/;
 
 /** A label as sent: 1-64 characters without control characters (cleaned later). */
 function isLabel(v: unknown): v is string {
@@ -606,6 +662,27 @@ export function parseTabMessage(
 			if (!isId(member)) return bad("member.remove.member missing");
 			return { ok: true, message: { type, member } };
 		}
+		case "group.mode": {
+			const mode = v["mode"];
+			if (mode !== "front" && mode !== "pinned") {
+				return bad('group.mode.mode must be "front" or "pinned"');
+			}
+			return { ok: true, message: { type, mode } };
+		}
+		case "group.pin": {
+			const tab = v["tab"];
+			if (typeof tab !== "string" || !TAB_ID.test(tab)) {
+				return bad("group.pin.tab must be a tab id of 1-15 digits");
+			}
+			return { ok: true, message: { type, tab } };
+		}
+		case "group.grant.revoke": {
+			const grantId = v["grantId"];
+			if (!isId(grantId)) return bad("group.grant.revoke.grantId missing");
+			return { ok: true, message: { type, grantId } };
+		}
+		case "focus":
+			return { ok: true, message: { type } };
 		case "pong": {
 			const t = v["t"];
 			if (typeof t !== "number") return bad("pong.t must be a number");

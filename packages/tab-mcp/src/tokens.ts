@@ -36,6 +36,8 @@ export interface GrantInput {
 	subject?: string;
 	/** Refreshes need a client assertion (DEC-106). */
 	clientAuth?: "private_key_jwt";
+	/** A group grant's group (DEC-232). */
+	group?: string;
 }
 
 /**
@@ -69,6 +71,7 @@ export async function issueTokenPair(
 		issuedAt: now,
 		...(grant.subject === undefined ? {} : { subject: grant.subject }),
 		...(grant.clientAuth === undefined ? {} : { clientAuth: grant.clientAuth }),
+		...(grant.group === undefined ? {} : { group: grant.group }),
 	};
 	const accessExpires = Math.min(
 		now + options.accessTtlMs,

@@ -74,10 +74,10 @@ test("review of PR 65: the file records the oldest relay schema that may open it
 	const db = new Database(path, { strict: true });
 	expect(
 		db.query("SELECT value FROM meta WHERE key = 'min_reader_version'").get(),
-	).toEqual({ value: 6 });
-	expect(db.query("PRAGMA user_version").get()).toEqual({ user_version: 7 });
-	// A later release marks the file as needing schema 8.
-	db.run("UPDATE meta SET value = 8 WHERE key = 'min_reader_version'");
+	).toEqual({ value: 8 });
+	expect(db.query("PRAGMA user_version").get()).toEqual({ user_version: 8 });
+	// A later release marks the file as needing schema 9.
+	db.run("UPDATE meta SET value = 9 WHERE key = 'min_reader_version'");
 	db.close();
 	expect(() => new SqliteTokenStore(path)).toThrow(/needs a newer relay/);
 	// Opening never lowers it.
@@ -86,7 +86,7 @@ test("review of PR 65: the file records the oldest relay schema that may open it
 		again
 			.query("SELECT value FROM meta WHERE key = 'min_reader_version'")
 			.get(),
-	).toEqual({ value: 8 });
+	).toEqual({ value: 9 });
 	again.close();
 });
 
@@ -156,11 +156,11 @@ test("a schema 5 file opens and gains the app column; its tokens go, as they wer
 			(c) => c.name,
 		),
 	).toContain("app");
-	expect(db.query("PRAGMA user_version").get()).toEqual({ user_version: 7 });
+	expect(db.query("PRAGMA user_version").get()).toEqual({ user_version: 8 });
 	// A relay of schema 5 would drop the column on write: it must refuse the file.
 	expect(
 		db.query("SELECT value FROM meta WHERE key = 'min_reader_version'").get(),
-	).toEqual({ value: 6 });
+	).toEqual({ value: 8 });
 	db.close();
 
 	// Opening again changes nothing: the step runs once, and deletes nothing more.
@@ -247,7 +247,7 @@ test("a version 2 SQLite file gains the subject, client_auth and app columns; it
 	await store.close();
 });
 
-test("DEC-231: a schema 6 file opens at 7 with a bindings table; its tokens stay as they were, and older relays may still open it", async () => {
+test("DEC-231: a schema 6 file opens with a bindings table; its tokens stay as they were", async () => {
 	const path = join(dir, "v6.db");
 	const record = {
 		hash: "h6",
@@ -288,12 +288,64 @@ test("DEC-231: a schema 6 file opens at 7 with a bindings table; its tokens stay
 	expect(await store.putBinding(binding, 16, 10)).toBe("ok");
 	await store.close();
 	const db = new Database(path, { strict: true });
-	expect(db.query("PRAGMA user_version").get()).toEqual({ user_version: 7 });
+	expect(db.query("PRAGMA user_version").get()).toEqual({ user_version: 8 });
 	expect(
 		db.query("SELECT value FROM meta WHERE key = 'min_reader_version'").get(),
-	).toEqual({ value: 6 });
+	).toEqual({ value: 8 });
 	db.close();
 	const again = new SqliteTokenStore(path);
 	expect(await again.getBinding("a6", 10)).toEqual(binding);
 	await again.close();
+});
+
+test("DEC-232: a schema 7 file gains the tokens' group and the groups' modes; its tokens stay page grants, and older relays refuse it", async () => {
+	const path = join(dir, "v7.db");
+	const page = {
+		hash: "h7",
+		kind: "access" as const,
+		grantId: "g7",
+		addressId: "a7",
+		app: "my-app",
+		clientId: "c",
+		clientName: "C",
+		scopes: ["tools"],
+		grantCreatedAt: 1,
+		issuedAt: 1,
+		expiresAt: 9_999_999_999_999,
+	};
+	const v7 = new Database(path, { create: true, strict: true });
+	v7.run(`CREATE TABLE tokens (hash TEXT PRIMARY KEY,
+		kind TEXT NOT NULL CHECK (kind IN ('access', 'refresh')),
+		grant_id TEXT NOT NULL, address_id TEXT NOT NULL, client_id TEXT NOT NULL,
+		client_name TEXT NOT NULL, scopes TEXT NOT NULL, grant_created_at INTEGER NOT NULL,
+		issued_at INTEGER NOT NULL, expires_at INTEGER NOT NULL, used_at INTEGER,
+		subject TEXT, client_auth TEXT, app TEXT NOT NULL DEFAULT '') STRICT`);
+	v7.run(
+		`INSERT INTO tokens VALUES ('h7', 'access', 'g7', 'a7', 'c', 'C', '["tools"]', 1, 1, 9999999999999, NULL, NULL, NULL, 'my-app')`,
+	);
+	v7.run("PRAGMA user_version = 7");
+	v7.close();
+
+	const store = new SqliteTokenStore(path);
+	expect(await store.get("h7")).toEqual(page);
+	const grant = {
+		...page,
+		hash: "hg",
+		grantId: "gg",
+		addressId: "group:grp",
+		group: "grp",
+	};
+	expect(await store.put(grant)).toBe(true);
+	expect(await store.get("hg")).toEqual(grant);
+	expect(await store.getGroupMode("grp")).toBeUndefined();
+	await store.setGroupMode("grp", "pinned");
+	expect(await store.getGroupMode("grp")).toBe("pinned");
+	await store.close();
+	const db = new Database(path, { strict: true });
+	expect(db.query("PRAGMA user_version").get()).toEqual({ user_version: 8 });
+	// A relay of schema 7 would drop the group when it refreshes such a grant.
+	expect(
+		db.query("SELECT value FROM meta WHERE key = 'min_reader_version'").get(),
+	).toEqual({ value: 8 });
+	db.close();
 });

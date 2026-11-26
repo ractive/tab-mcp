@@ -4,6 +4,7 @@ import type {
 	BindingRecord,
 	BindingSelector,
 	GrantSummary,
+	GroupMode,
 	RevokeOptions,
 	RevokeSelector,
 	TokenKind,
@@ -11,7 +12,7 @@ import type {
 	TokenStore,
 } from "./types.ts";
 
-const SCHEMA_VERSION = 7;
+const SCHEMA_VERSION = 8;
 /**
  * The oldest schema a relay must know to use a file of this version safely,
  * kept in the file's `meta` table (review of PR 65). A relay refuses a file
@@ -20,9 +21,11 @@ const SCHEMA_VERSION = 7;
  * one on refuse to open that file rather than quietly lose the column.
  * Version 6 added `app` (DEC-196): an older relay would drop it, and it
  * serves addresses that no longer exist. Version 7 added the `bindings`
- * table (DEC-231), which an older relay leaves alone: it stays 6.
+ * table (DEC-231), which an older relay leaves alone. Version 8 added the
+ * tokens' `group_key` (DEC-232): an older relay would drop it when it
+ * refreshes a group grant, which then reaches no browser, so it is 8.
  */
-const MIN_READER_VERSION = 6;
+const MIN_READER_VERSION = 8;
 /** The reuse window of used refresh tokens (DEC-091), for the version 4 step. */
 const REUSE_WINDOW_MS = 86_400_000;
 
@@ -41,6 +44,7 @@ interface Row {
 	used_at: number | null;
 	subject: string | null;
 	client_auth: string | null;
+	group_key: string | null;
 }
 
 function toRecord(row: Row): TokenRecord {
@@ -61,6 +65,7 @@ function toRecord(row: Row): TokenRecord {
 	if (row.subject !== null) record.subject = row.subject;
 	if (row.client_auth === "private_key_jwt")
 		record.clientAuth = "private_key_jwt";
+	if (row.group_key !== null) record.group = row.group_key;
 	return record;
 }
 
@@ -161,7 +166,8 @@ export class SqliteTokenStore implements TokenStore {
 				used_at INTEGER,
 				subject TEXT,
 				client_auth TEXT,
-				app TEXT NOT NULL DEFAULT ''
+				app TEXT NOT NULL DEFAULT '',
+				group_key TEXT
 			) STRICT`);
 			// Version 3: the subject of identity-bound grants (DEC-077).
 			const columns = this.#db.query("PRAGMA table_info(tokens)").all() as {
@@ -199,6 +205,15 @@ export class SqliteTokenStore implements TokenStore {
 			this.#db.run(
 				"CREATE INDEX IF NOT EXISTS bindings_group ON bindings (group_key)",
 			);
+			// Version 8: group grants and groups' modes (DEC-232). Rows
+			// without a group stay page grants, as before.
+			if (!columns.some((c) => c.name === "group_key")) {
+				this.#db.run("ALTER TABLE tokens ADD COLUMN group_key TEXT");
+			}
+			this.#db.run(`CREATE TABLE IF NOT EXISTS groups (
+				group_key TEXT PRIMARY KEY,
+				mode TEXT NOT NULL CHECK (mode IN ('front', 'pinned'))
+			) STRICT`);
 			this.#db.run(`CREATE TABLE IF NOT EXISTS nonces (
 				key TEXT PRIMARY KEY,
 				expires_at INTEGER NOT NULL
@@ -250,10 +265,10 @@ export class SqliteTokenStore implements TokenStore {
 			.query(
 				`INSERT OR REPLACE INTO tokens (hash, kind, grant_id, address_id, client_id,
 				client_name, scopes, grant_created_at, issued_at, expires_at, used_at, subject,
-				client_auth, app)
+				client_auth, app, group_key)
 				VALUES ($hash, $kind, $grant_id, $address_id, $client_id, $client_name,
 				$scopes, $grant_created_at, $issued_at, $expires_at, $used_at, $subject,
-				$client_auth, $app)`,
+				$client_auth, $app, $group_key)`,
 			)
 			.run({
 				hash: r.hash,
@@ -270,6 +285,7 @@ export class SqliteTokenStore implements TokenStore {
 				subject: r.subject ?? null,
 				client_auth: r.clientAuth ?? null,
 				app: r.app,
+				group_key: r.group ?? null,
 			});
 	}
 
@@ -345,6 +361,9 @@ export class SqliteTokenStore implements TokenStore {
 		this.#db
 			.query("DELETE FROM bindings WHERE expires_at <= $now")
 			.run({ now });
+		this.#db.run(
+			"DELETE FROM groups WHERE group_key NOT IN (SELECT group_key FROM bindings)",
+		);
 		return this.#db
 			.query("DELETE FROM tokens WHERE expires_at <= $now")
 			.run({ now }).changes;
@@ -458,6 +477,22 @@ export class SqliteTokenStore implements TokenStore {
 						.get({ group: selector.group, member_id: selector.memberId })
 		) as BindingRow | null;
 		return row === null ? undefined : toBinding(row);
+	}
+
+	async getGroupMode(group: string): Promise<GroupMode | undefined> {
+		const row = this.#db
+			.query("SELECT mode FROM groups WHERE group_key = $group")
+			.get({ group }) as { mode: GroupMode } | null;
+		return row?.mode;
+	}
+
+	async setGroupMode(group: string, mode: GroupMode): Promise<void> {
+		this.#db
+			.query(
+				`INSERT INTO groups (group_key, mode) VALUES ($group, $mode)
+				ON CONFLICT (group_key) DO UPDATE SET mode = excluded.mode`,
+			)
+			.run({ group, mode });
 	}
 
 	async close(): Promise<void> {

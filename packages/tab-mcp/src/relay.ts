@@ -1,6 +1,6 @@
 import type { Server, ServerWebSocket } from "bun";
 import { version } from "../package.json" with { type: "json" };
-import { shortAddress } from "./address.ts";
+import { groupAddress, groupOf, shortAddress } from "./address.ts";
 import { readBodyWithDeadline } from "./body.ts";
 import {
 	ANY_FIREFOX_EXTENSION,
@@ -12,6 +12,7 @@ import {
 	type Site,
 	type StoreKind,
 	shownOrigin,
+	signInAllowed,
 	siteFor,
 } from "./config.ts";
 import {
@@ -47,8 +48,28 @@ import {
 	SUBPROTOCOL,
 } from "./protocol.ts";
 import { clientHost, STORE_UNAVAILABLE_TEXT, TabSession } from "./session.ts";
-import { BrowserSignIn } from "./signin/browser.ts";
+import { AccountPairing } from "./signin/accounts.ts";
+import { BrowserSignIn, type GroupTarget } from "./signin/browser.ts";
 import type { SignInEndpoints } from "./signin/providers.ts";
+import {
+	ANSWERED_BY_META,
+	answeredText,
+	browserName,
+	editResponse,
+	failed,
+	findResponse,
+	joinTabLists,
+	LIST_TABS_HINT,
+	type MemberAnswer,
+	nameMember,
+	shownTab,
+	splitTab,
+	type ToolCall,
+	toolCall,
+	toolError,
+	toolResult,
+	withTab,
+} from "./signin/route.ts";
 import { guardStore, hasBindings } from "./store/guard.ts";
 import { MemoryTokenStore } from "./store/memory.ts";
 import { SqliteTokenStore } from "./store/sqlite.ts";
@@ -201,6 +222,55 @@ export interface RelayTestHooks extends AuthorizationTestMode {
 interface Body {
 	value: Record<string, unknown>;
 	text: string;
+}
+
+/**
+ * How long a member has to answer its part of a group's `list_tabs`
+ * (DEC-232): a member that has not answered by then is listed without its
+ * tabs. Below the keep-alive interval, so the joined answer starts before
+ * any proxy gives up on a silent request.
+ */
+const FANOUT_TIMEOUT_MS = 15_000;
+/** The joined `list_tabs` lists tabs up to this many characters; the rest are counted. */
+const LIST_TABS_BUDGET = 256 * 1024;
+
+type LogDone = (
+	status: number,
+	method: string,
+	extra?: Record<string, string | number>,
+) => void;
+
+/** A group grant's request, with what `handleMcp` found out about it (DEC-232). */
+interface GroupRequest {
+	req: Request;
+	app: string;
+	auth: TokenRecord;
+	group: string;
+	body: Body;
+	rpcId: RpcId | undefined;
+	method: string;
+	headers: Record<string, string>;
+	waitMs: number;
+	isListen: boolean;
+	clientHostName: string;
+	logDone: LogDone;
+	refused: (
+		result: "missing" | "invalid" | "unavailable",
+		reason?: string,
+	) => Response;
+	closed: () => Response;
+	full: (session: TabSession) => Response | undefined;
+	idle: (on: boolean) => void;
+}
+
+/** The member a group grant's request goes to (DEC-232). */
+interface GroupRoute {
+	session: TabSession;
+	member: string;
+	label: string;
+	fallback?: GroupTarget["fallback"];
+	/** The browser's own tab id for the `tab` argument, when the call named one. */
+	tab?: string;
 }
 
 function json(
@@ -446,6 +516,11 @@ function startRelay(
 		reason: "revoked" | "reuse_detected" | "expired",
 	): void {
 		remember(revokedGrants, grantId, Date.now() + REVOCATION_MEMORY_MS);
+		const group = groupOf(addressId);
+		if (group !== undefined) {
+			groupGrantEnded(group, grantId, reason);
+			return;
+		}
 		const session = sessions.get(addressId);
 		if (session === undefined) return;
 		if (session.ready) session.grantRemoved(grantId, reason);
@@ -462,6 +537,43 @@ function startRelay(
 				requests: ended,
 			});
 		}
+	}
+
+	/**
+	 * The app of each group grant that had a request (DEC-232): its requests
+	 * that end with it are answered for that app's address, which a member's
+	 * session (of the Chrome or the Firefox app) does not say.
+	 */
+	const groupGrantApps = new Map<string, string>();
+
+	/**
+	 * A group grant ended (DEC-232): its requests in flight end on every
+	 * member's session, and the members get `group` without it.
+	 */
+	function groupGrantEnded(
+		group: string,
+		grantId: string,
+		reason: "revoked" | "reuse_detected" | "expired",
+	): void {
+		const app = groupGrantApps.get(grantId);
+		groupGrantApps.delete(grantId);
+		let ended = 0;
+		for (const session of signIn?.onlineMembers(group) ?? []) {
+			ended += session.failGrant(
+				grantId,
+				401,
+				RelayErrorCode.signedOut,
+				reason === "expired" ? EXPIRED_TEXT : REVOKED_TEXT,
+				{ "www-authenticate": wwwAuthenticate(app ?? session.app ?? "", true) },
+			);
+		}
+		if (ended > 0) {
+			logger.info("grant.requests_ended", {
+				address: shortAddress(groupAddress(group)),
+				requests: ended,
+			});
+		}
+		signIn?.grantsChanged(group);
 	}
 
 	/**
@@ -517,6 +629,14 @@ function startRelay(
 				store,
 				publicUrl: () => publicUrl,
 				sessionOf: (addressId) => readySession(addressId),
+				groupGrantRemoved: (group, grantId, reason) => {
+					if (reason === "expired") {
+						logger.info("grant.expired", {
+							address: shortAddress(groupAddress(group)),
+						});
+					}
+					grantRemoved(groupAddress(group), grantId, reason);
+				},
 			},
 			{
 				...(hooks?.signInEndpoints === undefined
@@ -967,6 +1087,11 @@ function startRelay(
 			pool,
 			identityOf: (addressId) => readySession(addressId)?.identity,
 			grantAdded: (addressId: string, grant: GrantInfo) => {
+				const group = groupOf(addressId);
+				if (group !== undefined) {
+					signIn?.grantsChanged(group);
+					return;
+				}
 				const session = sessions.get(addressId);
 				if (session?.ready) session.grantAdded(grant);
 			},
@@ -976,6 +1101,15 @@ function startRelay(
 					grantId,
 					reason as "revoked" | "reuse_detected" | "expired",
 				),
+			...(signIn === undefined
+				? {}
+				: {
+						accounts: new AccountPairing(
+							signIn.providers,
+							{ logger, store, publicUrl: () => publicUrl },
+							(app) => signInAllowed(config, app),
+						),
+					}),
 		},
 		hooks,
 	);
@@ -1412,6 +1546,28 @@ function startRelay(
 			return undefined;
 		};
 
+		// A group grant (DEC-232): the relay chooses the member.
+		if (auth.group !== undefined) {
+			return groupMcp({
+				req,
+				app,
+				auth,
+				group: auth.group,
+				body,
+				rpcId,
+				method,
+				headers,
+				waitMs,
+				isListen,
+				clientHostName,
+				logDone,
+				refused,
+				closed,
+				full,
+				idle,
+			});
+		}
+
 		if (readySession(addressId, usable) === undefined && waitMs > 0) {
 			idle(false);
 		}
@@ -1496,6 +1652,469 @@ function startRelay(
 			req.signal.removeEventListener("abort", onAbort);
 			retried = true;
 		}
+	}
+
+	// Group grants (DEC-232)
+
+	/**
+	 * A group grant's request: the relay chooses the member (a `tab`
+	 * argument's, the pin's, or the one whose window had the focus last),
+	 * takes the member off the `tab` argument, and names the member in the
+	 * result. `list_tabs` goes to every member online.
+	 */
+	async function groupMcp(g: GroupRequest): Promise<Response> {
+		const sign = signIn;
+		if (sign === undefined || g.auth.addressId !== groupAddress(g.group)) {
+			// No sign-in on this relay, or a record that does not hold
+			// together: no browser of the group can be reached.
+			return groupNotOpen(g);
+		}
+		remember(groupGrantApps, g.auth.grantId, g.app);
+		const call = toolCall(g.body.value);
+		g.idle(false);
+		if (call?.name === "list_tabs") {
+			const answer = await groupListTabs(g, sign);
+			g.idle(true);
+			return answer;
+		}
+		let retried = false;
+		for (;;) {
+			const route = await routeGroup(g, sign, call, retried);
+			if (route instanceof Response) {
+				g.idle(true);
+				return route;
+			}
+			const { session } = route;
+			// Revoked on this instance since the token was checked: refused in
+			// the same step as the forward.
+			if (revokedLately(g.auth)) {
+				g.idle(true);
+				return g.refused("invalid", "revoked");
+			}
+			const refusal = g.full(session);
+			if (refusal !== undefined) {
+				g.idle(true);
+				return refusal;
+			}
+			let retry: () => void = () => {};
+			const retrying = new Promise<typeof RETRY>((resolve) => {
+				retry = () => resolve(RETRY);
+			});
+			const mayRetry =
+				!retried && g.waitMs > 0 && isRetryable(g.body.value["method"]);
+			const headers =
+				route.tab !== undefined && g.headers["mcp-param-tab"] !== undefined
+					? { ...g.headers, "mcp-param-tab": route.tab }
+					: g.headers;
+			const exchange = session.forward({
+				headers,
+				body:
+					route.tab === undefined
+						? g.body.text
+						: withTab(g.body.value, route.tab),
+				rpcId: g.rpcId,
+				isListen: g.isListen,
+				grant: {
+					grantId: g.auth.grantId,
+					clientId: g.auth.clientId,
+					scopes: g.auth.scopes,
+				},
+				extraHeaders: corsHeaders,
+				onDone: (e: Exchange) => {
+					if (e.outcome === "page_gone_retry") return;
+					g.idle(true);
+					g.logDone(e.status, g.method, {
+						session: session.sessionId,
+						client: g.clientHostName,
+						outcome: e.outcome,
+						...(e.outcome === "page_gone" ? { reason: "page_not_open" } : {}),
+					});
+				},
+				pageGone: (waiting) => {
+					if (waiting && mayRetry && !g.req.signal.aborted) {
+						retry();
+						return { retry: true };
+					}
+					const answer = notOpenAnswer(
+						g.body.value,
+						g.rpcId,
+						undefined,
+						closing ? "restarting_gone" : "group_gone",
+						RELAY_INFO,
+					);
+					if (answer !== undefined) return { retry: false, body: answer };
+					return !closing
+						? { retry: false }
+						: {
+								retry: false,
+								error: {
+									status: 503,
+									code: RelayErrorCode.restarting,
+									message: "The relay is restarting.",
+									headers: { "retry-after": RETRY_AFTER_S },
+								},
+							};
+				},
+			});
+			const onAbort = () => exchange.clientClosed();
+			g.req.signal.addEventListener("abort", onAbort, { once: true });
+			const result = await Promise.race([exchange.response, retrying]);
+			if (result !== RETRY) {
+				const text = answeredText(route.member, route.label, route.fallback);
+				return editResponse(result, g.rpcId, (message) => {
+					// `use_tab` pins for the group once the member pinned it
+					// (it pins only a tab it may read).
+					if (
+						call?.name === "use_tab" &&
+						route.tab !== undefined &&
+						!failed(message)
+					) {
+						void sign.pin(g.group, route.member, route.tab);
+					}
+					return nameMember(message, call !== undefined, {
+						member: route.member,
+						label: route.label,
+						text,
+					});
+				});
+			}
+			g.req.signal.removeEventListener("abort", onAbort);
+			retried = true;
+		}
+	}
+
+	/**
+	 * The member a group grant's request goes to, waiting up to `waitMs` for
+	 * it (or for any member) to come online; or the answer when there is
+	 * none. A call whose `tab` names a member, or a pin, goes to that member
+	 * or fails with the reason: never to another browser.
+	 */
+	async function routeGroup(
+		g: GroupRequest,
+		sign: BrowserSignIn,
+		call: ToolCall | undefined,
+		resent: boolean,
+	): Promise<GroupRoute | Response> {
+		let labels: Map<string, string>;
+		let routing: Awaited<ReturnType<BrowserSignIn["routing"]>>;
+		try {
+			labels = await sign.labels(g.group);
+			routing = await sign.routing(g.group);
+		} catch (error) {
+			logger.error("store.error", {
+				op: "listBindings",
+				...errorFields(error),
+			});
+			return g.refused("unavailable");
+		}
+		const labelOf = (member: string) => labels.get(member) ?? "Browser";
+		let wanted: string | undefined;
+		let tab: string | undefined;
+		let offline = "";
+		if (call !== undefined && call.tab !== undefined) {
+			const shown = shownTab(
+				typeof call.tab === "string" ? call.tab : JSON.stringify(call.tab),
+			);
+			const parts =
+				typeof call.tab === "string" ? splitTab(call.tab) : undefined;
+			if (parts === undefined || !labels.has(parts.member)) {
+				return groupAnswer(
+					g,
+					`Not a tab id of the user's browsers from list_tabs: ${shown}. ${LIST_TABS_HINT}`,
+					"unknown_tab",
+				);
+			}
+			wanted = parts.member;
+			tab = parts.tab;
+			offline = `The tab ${shown} is in ${browserName(labelOf(wanted))}, which is not online; nothing was done in another tab. ${LIST_TABS_HINT}`;
+		} else if (routing.mode === "pinned" && routing.pin !== undefined) {
+			wanted = routing.pin.member;
+			if (!labels.has(wanted)) {
+				return groupAnswer(
+					g,
+					`The pinned tab was in a browser that is no longer signed in with the user's account; nothing was done in another tab. ${LIST_TABS_HINT}`,
+					"pin_removed",
+				);
+			}
+			offline = `The pinned tab is in ${browserName(labelOf(wanted))}, which is not online; nothing was done in another tab. ${LIST_TABS_HINT}`;
+		}
+		const pick = (): GroupRoute | undefined => {
+			if (wanted !== undefined) {
+				const session = sign.memberSession(g.group, wanted);
+				return session === undefined
+					? undefined
+					: {
+							session,
+							member: wanted,
+							label: labelOf(wanted),
+							...(tab === undefined ? {} : { tab }),
+						};
+			}
+			const target = sign.target(g.group);
+			return target === undefined
+				? undefined
+				: {
+						session: target.session,
+						member: target.member,
+						label: labelOf(target.member),
+						...(target.fallback === undefined
+							? {}
+							: { fallback: target.fallback }),
+					};
+		};
+		const none = () =>
+			wanted === undefined
+				? groupNotOpen(g)
+				: groupAnswer(g, offline, "member_offline");
+		let route = pick();
+		let waited = resent;
+		if (route === undefined) {
+			waited = true;
+			const came = await sign.waitForMember(
+				g.group,
+				wanted,
+				g.req.signal,
+				closing ? 0 : g.waitMs,
+			);
+			if (g.req.signal.aborted) return g.closed();
+			if (!came) return none();
+		}
+		if (waited) {
+			// The token was checked before the wait: its grant may have been
+			// revoked meanwhile.
+			const again = await authenticate(g.req, g.app);
+			if (typeof again === "string") return g.refused(again, "revoked");
+			if (g.req.signal.aborted) return g.closed();
+		}
+		route = pick();
+		if (route === undefined) return none();
+		if (Buffer.byteLength(g.body.text) > route.session.limits.maxMessageBytes) {
+			g.logDone(413, g.method);
+			return rpcError(
+				413,
+				g.rpcId,
+				-32600,
+				"Request body too large.",
+				corsHeaders,
+			);
+		}
+		return route;
+	}
+
+	/**
+	 * `list_tabs` for a group: the same request to every member online (each
+	 * lists only its own tabs, and none sees another's), the answers joined
+	 * with ids `<member>:<tab>` and the members' labels.
+	 */
+	async function groupListTabs(
+		g: GroupRequest,
+		sign: BrowserSignIn,
+	): Promise<Response> {
+		let sessions = sign.onlineMembers(g.group);
+		if (sessions.length === 0) {
+			await sign.waitForMember(
+				g.group,
+				undefined,
+				g.req.signal,
+				closing ? 0 : g.waitMs,
+			);
+			if (g.req.signal.aborted) return g.closed();
+			const again = await authenticate(g.req, g.app);
+			if (typeof again === "string") return g.refused(again, "revoked");
+			sessions = sign.onlineMembers(g.group);
+			if (sessions.length === 0) return groupNotOpen(g);
+		}
+		let labels: Map<string, string>;
+		let routing: Awaited<ReturnType<BrowserSignIn["routing"]>>;
+		try {
+			labels = await sign.labels(g.group);
+			routing = await sign.routing(g.group);
+		} catch (error) {
+			logger.error("store.error", {
+				op: "listBindings",
+				...errorFields(error),
+			});
+			return g.refused("unavailable");
+		}
+		if (revokedLately(g.auth)) return g.refused("invalid", "revoked");
+		const asked = await Promise.all(sessions.map((s) => askMember(g, s)));
+		const answers: MemberAnswer[] = [];
+		const members = new Set(labels.keys());
+		for (const s of sessions) members.add(s.member?.memberId ?? "");
+		for (const member of members) {
+			const i = sessions.findIndex((s) => s.member?.memberId === member);
+			const label = labels.get(member) ?? "Browser";
+			answers.push(
+				i < 0
+					? { member, label, online: false }
+					: { member, label, online: true, ...asked[i] },
+			);
+		}
+		const target =
+			routing.mode === "pinned" && routing.pin !== undefined
+				? undefined
+				: sign.target(g.group);
+		const joined = joinTabLists(
+			answers,
+			routing,
+			target === undefined
+				? undefined
+				: {
+						member: target.member,
+						label: labels.get(target.member) ?? "Browser",
+					},
+			LIST_TABS_BUDGET,
+		);
+		const answering = answers.filter((a) => a.result !== undefined);
+		const text =
+			answering.length === 0
+				? "No browser of the group answered."
+				: `Answered by ${answering.map((a) => browserName(a.label)).join(", ")}: each lists only its own tabs.`;
+		g.logDone(200, g.method, {
+			outcome: "list_tabs",
+			members: sessions.length,
+			answered: answering.length,
+		});
+		return new Response(
+			toolResult(g.rpcId, joined, [text], {
+				[ANSWERED_BY_META]: {
+					members: answering.map((a) => ({ member: a.member, label: a.label })),
+				},
+			}),
+			{
+				status: 200,
+				headers: { ...corsHeaders, "content-type": "application/json" },
+			},
+		);
+	}
+
+	/**
+	 * One member's part of a group's `list_tabs`: a request the relay makes
+	 * itself on the member's session, with the AI app's grant, answered
+	 * within `FANOUT_TIMEOUT_MS`.
+	 */
+	async function askMember(
+		g: GroupRequest,
+		session: TabSession,
+	): Promise<{ result?: Record<string, unknown>; error?: string }> {
+		if (session.pending.size >= session.limits.maxConcurrentRequests) {
+			return { error: "It is busy: too many requests at once." };
+		}
+		const exchange = session.forward({
+			headers: g.headers,
+			body: g.body.text,
+			rpcId: g.rpcId,
+			isListen: false,
+			grant: {
+				grantId: g.auth.grantId,
+				clientId: g.auth.clientId,
+				scopes: g.auth.scopes,
+			},
+			extraHeaders: {},
+			onDone: () => {},
+			pageGone: () => ({ retry: false }),
+		});
+		let timer: Timer | undefined;
+		const late = new Promise<"late">((resolve) => {
+			timer = setTimeout(() => resolve("late"), FANOUT_TIMEOUT_MS);
+		});
+		const onAbort = () => exchange.clientClosed();
+		g.req.signal.addEventListener("abort", onAbort, { once: true });
+		try {
+			const response = await Promise.race([exchange.response, late]);
+			const text =
+				response === "late"
+					? "late"
+					: await Promise.race([response.text(), late]);
+			if (response === "late" || text === "late") {
+				exchange.clientClosed();
+				return { error: "It did not answer in time." };
+			}
+			const message = findResponse(
+				text,
+				response.headers.get("content-type") ?? "",
+				g.rpcId,
+			);
+			const result = message?.["result"];
+			if (typeof result !== "object" || result === null) {
+				return { error: "Its answer was not a list of tabs." };
+			}
+			if ((result as Record<string, unknown>)["isError"] === true) {
+				return { error: "Its list_tabs failed." };
+			}
+			return { result: result as Record<string, unknown> };
+		} finally {
+			clearTimeout(timer);
+			g.req.signal.removeEventListener("abort", onAbort);
+		}
+	}
+
+	/**
+	 * An answer the relay gives for a group grant's request it cannot route
+	 * (HTTP 200): a tool result with `isError` for a tool call, else a
+	 * JSON-RPC error `-31001`; a notification gets 503.
+	 */
+	function groupAnswer(
+		g: GroupRequest,
+		text: string,
+		reason: string,
+	): Response {
+		if (g.rpcId === undefined) {
+			g.logDone(503, g.method, { reason });
+			return rpcError(
+				503,
+				undefined,
+				RelayErrorCode.pageNotOpen,
+				text,
+				corsHeaders,
+			);
+		}
+		g.logDone(200, g.method, { reason });
+		return new Response(
+			g.body.value["method"] === "tools/call"
+				? toolError(g.rpcId, text)
+				: rpcErrorBody(g.rpcId, RelayErrorCode.pageNotOpen, text),
+			{
+				status: 200,
+				headers: { ...corsHeaders, "content-type": "application/json" },
+			},
+		);
+	}
+
+	/** No browser of the group is online: "the page is not open" for a group (or the relay stops). */
+	function groupNotOpen(g: GroupRequest): Response {
+		const phase: NotOpenPhase = closing ? "restarting" : "group_offline";
+		const reason = closing ? "restarting" : "group_offline";
+		const answer = notOpenAnswer(
+			g.body.value,
+			g.rpcId,
+			undefined,
+			phase,
+			RELAY_INFO,
+		);
+		if (answer === undefined) {
+			g.logDone(503, g.method, { reason });
+			return closing
+				? rpcError(
+						503,
+						g.rpcId,
+						RelayErrorCode.restarting,
+						"The relay is restarting.",
+						{ ...corsHeaders, "retry-after": RETRY_AFTER_S },
+					)
+				: rpcError(
+						503,
+						g.rpcId,
+						RelayErrorCode.pageNotOpen,
+						"No browser of the group is online.",
+						corsHeaders,
+					);
+		}
+		g.logDone(200, g.method, { reason });
+		return new Response(answer, {
+			status: 200,
+			headers: { ...corsHeaders, "content-type": "application/json" },
+		});
 	}
 
 	/**
@@ -1830,6 +2449,7 @@ function startRelay(
 		if (!sweepingGrants) {
 			sweepingGrants = true;
 			sweepExpiredGrants()
+				.then(() => signIn?.sweepGroupGrants(Date.now()))
 				.catch((error: unknown) =>
 					logger.error("store.error", {
 						op: "listGrants",
@@ -1888,6 +2508,7 @@ function startRelay(
 				for (const set of [...waiters.values()]) {
 					for (const wake of [...set]) wake(undefined);
 				}
+				signIn?.wakeAll();
 				for (const session of [...allSessions]) {
 					session.end(
 						CloseCode.shuttingDown,

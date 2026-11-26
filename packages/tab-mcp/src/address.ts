@@ -8,6 +8,8 @@
 import { randomBase64url } from "./crypto.ts";
 
 const BASE32_ALPHABET = "abcdefghijklmnopqrstuvwxyz234567";
+/** The prefix of a group's address id (DEC-232). */
+const GROUP_PREFIX = "group:";
 
 /** RFC 4648 base32, lower case, without padding. */
 export function base32(bytes: Uint8Array): string {
@@ -63,5 +65,22 @@ export function newSecret(): string {
 
 /** Shortened address id for logs: enough to correlate, too short to use. */
 export function shortAddress(id: string): string {
-	return id.slice(0, 8);
+	return id.slice(0, id.startsWith(GROUP_PREFIX) ? GROUP_PREFIX.length + 8 : 8);
+}
+
+/**
+ * The address id of a group's grants (DEC-232): what a group grant's token
+ * record holds instead of a page's address id, so that revoking, listing
+ * and the tombstones work for it as for a page. No page has it: a page's
+ * address id is base32 (`a-z`, `2-7`), never with a colon.
+ */
+export function groupAddress(group: string): string {
+	return `${GROUP_PREFIX}${group}`;
+}
+
+/** The group of a group's address id (`groupAddress`); `undefined` for a page's. */
+export function groupOf(addressId: string): string | undefined {
+	return addressId.startsWith(GROUP_PREFIX)
+		? addressId.slice(GROUP_PREFIX.length)
+		: undefined;
 }

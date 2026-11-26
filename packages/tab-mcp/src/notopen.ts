@@ -11,14 +11,18 @@ import { MCP_PROTOCOL_VERSION } from "./protocol.ts";
  * Why the page is not there: never came, went away mid-request, or is open
  * but nobody is signed in to it (identity binding, DEC-077). While the relay
  * stops, `restarting` (the request never reached the page) or
- * `restarting_gone` (it was in flight).
+ * `restarting_gone` (it was in flight). For a group grant (DEC-232):
+ * `group_offline` (no browser of the group is online) and `group_gone` (the
+ * browser that had the request went away).
  */
 export type NotOpenPhase =
 	| "not_open"
 	| "gone"
 	| "signed_out"
 	| "restarting"
-	| "restarting_gone";
+	| "restarting_gone"
+	| "group_offline"
+	| "group_gone";
 
 /** What the relay says about itself in a stand-in `server/discover` result. */
 export interface RelayInfo {
@@ -55,10 +59,22 @@ export function restartingText(): string {
 	return "The relay is restarting. Try again in a few seconds.";
 }
 
+/** The text for a group grant whose browsers are all offline (DEC-232). */
+export function groupOfflineText(): string {
+	return "No browser signed in with the user's account in the tab-mcp browser extension is online. Ask the user to open one of them and turn on AI access there, then try again.";
+}
+
+/** The text for a group grant's tool call whose browser went away while it ran. */
+export function groupGoneText(): string {
+	return "The browser closed its connection while the tool was running, so it may or may not have finished. Ask the user to open it again, then check the result before trying again.";
+}
+
 function phaseText(phase: NotOpenPhase, appName: string | undefined): string {
 	if (phase === "restarting" || phase === "restarting_gone") {
 		return restartingText();
 	}
+	if (phase === "group_offline") return groupOfflineText();
+	if (phase === "group_gone") return groupGoneText();
 	return phase === "signed_out" ? signedOutText(appName) : notOpenText(appName);
 }
 
@@ -132,7 +148,7 @@ export function notOpenAnswer(
 		id,
 		error: {
 			code:
-				phase === "gone"
+				phase === "gone" || phase === "group_gone"
 					? RelayErrorCode.tabGone
 					: phase === "restarting" || phase === "restarting_gone"
 						? RelayErrorCode.restarting

@@ -61,7 +61,19 @@ export interface TokenRecord {
 	 * client's key.
 	 */
 	clientAuth?: "private_key_jwt";
+	/**
+	 * A group grant (DEC-232): the group (a binding's `group`, the hash of a
+	 * signed-in account) the grant was made for, instead of one browser. Its
+	 * `addressId` is then the group's own (`groupAddress`), which no page
+	 * has. Must be stored and returned unchanged: a store that drops it makes
+	 * such a grant reach no browser (the relay answers that the page is not
+	 * open).
+	 */
+	group?: string;
 }
+
+/** Where a group's calls go without a `tab` argument (DEC-232). */
+export type GroupMode = "front" | "pinned";
 
 /** One connected AI app of an address. */
 export interface GrantSummary {
@@ -159,8 +171,8 @@ export interface TokenStore {
 	 */
 	claimNonce?(key: string, expiresAt: number, now: number): Promise<boolean>;
 	/**
-	 * Optional, all five or none (DEC-231): the bindings of signed-in
-	 * browsers. A relay that lets browsers sign in (`signIn`) refuses to start
+	 * Optional, all seven or none (DEC-231, DEC-232): the bindings of
+	 * signed-in browsers, and their groups' modes (below). A relay that lets browsers sign in (`signIn`) refuses to start
 	 * with a store that lacks them. Bindings with `expiresAt <= now` count as
 	 * absent everywhere; `deleteExpired` should drop them.
 	 *
@@ -192,6 +204,16 @@ export interface TokenStore {
 	): Promise<boolean>;
 	/** Delete one binding; returns it (live or not), or `undefined` if there was none. */
 	deleteBinding?(selector: BindingSelector): Promise<BindingRecord | undefined>;
+	/**
+	 * A group's mode (DEC-232): where its calls go without a `tab`
+	 * argument, as a member last set it; `undefined` if none set one (the
+	 * relay then takes `front`). Part of the binding methods: all seven or
+	 * none. `deleteExpired` should drop the mode of a group without a live
+	 * binding.
+	 */
+	getGroupMode?(group: string): Promise<GroupMode | undefined>;
+	/** Set a group's mode, replacing the one before. */
+	setGroupMode?(group: string, mode: GroupMode): Promise<void>;
 	/** Release resources (database handles). Optional. */
 	close?(): Promise<void>;
 }
