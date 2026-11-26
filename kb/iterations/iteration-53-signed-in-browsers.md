@@ -70,7 +70,11 @@ ID token; `email` is left out: the relay keeps no address, and Entra ID's `email
 is optional and often missing), Google `openid email` (the address is what the panel
 shows), none at GitHub, where `GET /user` returns the public profile with the `id`
 without one. Nothing more. What the panel shows as "Signed in as …": Microsoft's
-`preferred_username`, Google's `email`, GitHub's login name.
+`preferred_username`, Google's `email`, GitHub's login name. For Microsoft it adds
+"(personal account)" when `tid` is the consumer tenant
+`9188040d-6c67-4c5b-b112-36a304b66dad`, else "(work or school account)": one address can
+name a personal and a work account at once (an alias of an outlook.com account and a
+user of an Entra tenant with that domain), and they are two groups.
 
 One callback for every provider and both flows (a browser's sign-in, an AI app's):
 `https://<relay>/authorize/callback`, as `oidc.ts` has it; the flow's `state` says which
