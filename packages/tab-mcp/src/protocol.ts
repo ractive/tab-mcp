@@ -115,6 +115,11 @@ export interface SignInDoneMessage {
 	provider: string;
 	/** "Signed in as …": the e-mail address, user name or login. Not kept by the relay. */
 	displayName: string;
+	/**
+	 * Microsoft only: a personal account (the consumer tenant) or a work or
+	 * school one. The same address can name one of each, and both show it.
+	 */
+	kind?: "personal" | "work";
 	/** This browser's member id in the group. */
 	member: string;
 }
@@ -124,11 +129,17 @@ export type SignInFailure =
 	| "rate_limited"
 	| "busy"
 	| "provider_unavailable"
-	| "provider_error"
-	| "unchecked"
-	| "browser"
+	| "code_refused"
 	| "group_full"
 	| "store_unavailable";
+/**
+ * Why a sign-in came back without a completion code: the reason in the
+ * redirect URL (`signin_error`), which only the extension sees.
+ */
+export type SignInRedirectError =
+	| "provider_error"
+	| "unchecked"
+	| "session_gone";
 export interface SignInFailedMessage {
 	type: "signin.failed";
 	provider?: string;
@@ -303,6 +314,11 @@ export interface SignInStartMessage {
 	/** The member's label in the group, e.g. "Chrome on macOS". */
 	label?: string;
 }
+/** Hand back the completion code of the redirect URL: only then is the browser bound. */
+export interface SignInCompleteMessage {
+	type: "signin.complete";
+	code: string;
+}
 export interface SignInOutMessage {
 	type: "signin.out";
 }
@@ -380,6 +396,7 @@ export type TabMessage =
 	| IdentityMessage
 	| IdentityLogoutMessage
 	| SignInStartMessage
+	| SignInCompleteMessage
 	| SignInOutMessage
 	| MemberRenameMessage
 	| MemberRemoveMessage
@@ -455,6 +472,7 @@ export interface ParseOptions {
 /** The sign-in messages, known only to a session that offers sign-in. */
 const SIGN_IN_TYPES: ReadonlySet<string> = new Set([
 	"signin.start",
+	"signin.complete",
 	"signin.out",
 	"member.rename",
 	"member.remove",
@@ -563,6 +581,13 @@ export function parseTabMessage(
 						? { type, provider, redirectUrl }
 						: { type, provider, redirectUrl, label },
 			};
+		}
+		case "signin.complete": {
+			const code = v["code"];
+			if (!isString(code, MAX_ID) || code === "") {
+				return bad("signin.complete.code missing");
+			}
+			return { ok: true, message: { type, code } };
 		}
 		case "signin.out":
 			return { ok: true, message: { type } };

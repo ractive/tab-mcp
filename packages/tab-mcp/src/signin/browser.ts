@@ -6,9 +6,14 @@
  * extension opens with `identity.launchWebAuthFlow`. That URL sets a cookie
  * and sends the browser to the provider; the provider sends it back to
  * `/authorize/callback` (the one callback of every flow, told apart by the
- * `state`'s `browser.` prefix); the relay binds the session's address id to
- * the account and sends the browser to the extension's redirect URL, with
- * nothing secret in it. The result reaches the extension over its session.
+ * `state`'s `browser.` prefix). The relay checks the account but binds
+ * nothing yet: it sends the browser to the extension's redirect URL with a
+ * single-use completion code, a URL that only the `launchWebAuthFlow` the
+ * extension started sees. The extension hands the code back over its own
+ * session (`signin.complete`), and only then does the relay bind the
+ * session's address id to the account and tell it who signed in. A user who
+ * finishes someone else's link is left with the code in their own address
+ * bar; the other session never gets it, and nothing is bound.
  *
  * Every browser bound to the same account is a member of one group. The
  * group's state goes to every member's session when it changes and when a
@@ -30,12 +35,14 @@ import {
 	type GroupMessage,
 	SIGN_IN_CAPABILITY,
 	type SignInFailure,
+	type SignInRedirectError,
 } from "../protocol.ts";
 import { RateLimiter } from "../ratelimit.ts";
 import type { TabSession } from "../session.ts";
 import type { BindingRecord, TokenStore } from "../store/types.ts";
 import { newId } from "../tokens.ts";
 import {
+	type SignInAccount,
 	type SignInEndpoints,
 	type SignInProvider,
 	signInProviders,
@@ -49,6 +56,8 @@ export const BINDING_LIFETIME_MS: number = 90 * 86_400_000;
 const FLOW_TTL_MS = 10 * 60_000;
 /** Open sign-ins on the relay; one per session at most. */
 const MAX_FLOWS = 10_000;
+/** How long the extension has to hand back the completion code. */
+const COMPLETION_TTL_MS = 2 * 60_000;
 /** The `state` of a browser's sign-in starts with this (an AI app's has none). */
 const STATE_PREFIX = "browser.";
 /** The label of a member whose browser sent none. */
@@ -106,6 +115,13 @@ interface Flow {
 	cookie?: string;
 }
 
+/** A checked sign-in that waits for its extension's `signin.complete`. */
+interface Completion {
+	flow: Flow;
+	account: SignInAccount;
+	expiresAt: number;
+}
+
 /** The cookie's name for a flow: one per flow, so two sign-ins at once do not clash. */
 function cookieName(flow: Flow, secure: boolean): string {
 	return `${secure ? "__Host-" : ""}tab-mcp-signin-${flow.start.slice(0, 8)}`;
@@ -147,10 +163,8 @@ const FAILURE_TEXT: Record<SignInFailure, string> = {
 	busy: "Too many sign-ins are open right now. Wait a few minutes and try again.",
 	provider_unavailable:
 		"The sign-in provider cannot be reached right now. Try again in a minute.",
-	provider_error: "The sign-in did not finish at the provider. Try again.",
-	unchecked: "The sign-in could not be checked. Try again.",
-	browser:
-		"The sign-in came back in another browser than the one that started it. Try again.",
+	code_refused:
+		"This sign-in has expired or belongs to another sign-in. Sign in again.",
 	group_full: `This account already has ${MAX_MEMBERS} browsers signed in. Remove one in another browser's panel, then sign in again.`,
 	store_unavailable:
 		"The relay cannot save the sign-in right now. Try again shortly.",
@@ -167,6 +181,8 @@ export class BrowserSignIn {
 	readonly #starts = new Map<string, string>();
 	/** Each session's one open flow. */
 	readonly #flowOf = new Map<TabSession, string>();
+	/** Completion code → checked sign-in; insertion order is expiry order. */
+	readonly #completions = new Map<string, Completion>();
 	/** The members' sessions that are online, per group. */
 	readonly #online = new Map<string, Set<TabSession>>();
 	/** Sign-ins a session may start: 5, then one every 30 s. */
@@ -577,9 +593,12 @@ export class BrowserSignIn {
 
 	/**
 	 * GET `/authorize/callback` with a browser's `state`: check the flow,
-	 * redeem the code, bind, and send the browser to the extension. The
-	 * session hears the result; the redirect carries only `signin=done` or
-	 * `signin=failed`.
+	 * redeem the code and check the account, then send the browser to the
+	 * extension's redirect URL with a completion code (`?signin=<code>`), or
+	 * the reason it failed (`?signin_error=<reason>`). Nothing is bound and
+	 * nothing goes to the session here: only the extension that started the
+	 * `launchWebAuthFlow` sees that URL, and it hands the code back itself
+	 * (`complete`).
 	 */
 	async callback(req: Request, ip: string): Promise<Response> {
 		if (!this.#viewsPerNetwork.take(networkKey(ip))) {
@@ -599,7 +618,7 @@ export class BrowserSignIn {
 			);
 		}
 		this.#dropFlow(state); // single use
-		const { session, provider } = flow;
+		const { provider } = flow;
 		const secure = this.#host.publicUrl().startsWith("https:");
 		const sent = cookieValue(req, cookieName(flow, secure));
 		if (
@@ -608,10 +627,24 @@ export class BrowserSignIn {
 			!constantTimeEqual(sent, flow.cookie)
 		) {
 			// Not the browser that opened the link: show nothing of the extension.
-			this.#failed(session, "browser", provider.id);
-			return this.#page(403, FAILURE_TEXT.browser);
+			this.#host.logger.info("signin.failed", {
+				address: shortAddress(flow.addressId),
+				reason: "browser",
+				provider: provider.id,
+			});
+			return this.#page(
+				403,
+				"The sign-in came back in another browser than the one that started it.",
+			);
 		}
-		const back = (ok: boolean) => this.#backToExtension(flow, ok);
+		const failed = (reason: SignInRedirectError) => {
+			this.#host.logger.info("signin.failed", {
+				address: shortAddress(flow.addressId),
+				reason,
+				provider: provider.id,
+			});
+			return this.#backToExtension(flow, { signin_error: reason });
+		};
 		const error = params.get("error");
 		const code = params.get("code");
 		if (error !== null || code === null || code === "") {
@@ -619,18 +652,10 @@ export class BrowserSignIn {
 				provider: provider.id,
 				error: (error ?? "no_code").slice(0, 64),
 			});
-			this.#failed(session, "provider_error", provider.id);
-			return back(false);
+			return failed("provider_error");
 		}
-		if (!this.#current(flow)) {
-			this.#host.logger.info("signin.failed", {
-				address: shortAddress(flow.addressId),
-				reason: "session_gone",
-				provider: provider.id,
-			});
-			return back(false);
-		}
-		let account: { key: string; displayName: string };
+		if (!this.#current(flow)) return failed("session_gone");
+		let account: SignInAccount;
 		try {
 			account = await provider.complete(code, this.#secrets(flow));
 		} catch (e) {
@@ -649,11 +674,44 @@ export class BrowserSignIn {
 				reason,
 				message: detail.slice(0, 200),
 			});
-			this.#failed(session, "unchecked", provider.id);
-			return back(false);
+			return failed("unchecked");
 		}
-		const ok = await session.serialSignIn(() => this.#bind(flow, account));
-		return back(ok);
+		if (this.#completions.size >= MAX_FLOWS) {
+			const oldest = this.#completions.keys().next().value;
+			if (oldest !== undefined) this.#completions.delete(oldest);
+		}
+		const completion = randomBase64url(24);
+		this.#completions.set(completion, {
+			flow,
+			account,
+			expiresAt: Date.now() + COMPLETION_TTL_MS,
+		});
+		this.#host.logger.info("signin.checked", {
+			address: shortAddress(flow.addressId),
+			provider: provider.id,
+		});
+		return this.#backToExtension(flow, { signin: completion });
+	}
+
+	/**
+	 * `signin.complete`: the extension hands back the completion code of its
+	 * redirect URL. It binds only for the session whose flow made it, once,
+	 * within two minutes; anything else is `code_refused`, and the code is
+	 * spent either way.
+	 */
+	async complete(session: TabSession, code: string): Promise<void> {
+		this.#sweep(Date.now());
+		const completion = this.#completions.get(code);
+		if (completion !== undefined) this.#completions.delete(code);
+		if (
+			completion === undefined ||
+			completion.expiresAt <= Date.now() ||
+			completion.flow.session !== session
+		) {
+			this.#failed(session, "code_refused", completion?.flow.provider.id);
+			return;
+		}
+		await this.#bind(completion.flow, completion.account);
 	}
 
 	/** The flow's session still holds its address: a sign-in for it may bind. */
@@ -665,10 +723,7 @@ export class BrowserSignIn {
 	}
 
 	/** Bind the flow's address to the account; tell the session and the groups. */
-	async #bind(
-		flow: Flow,
-		account: { key: string; displayName: string },
-	): Promise<boolean> {
+	async #bind(flow: Flow, account: SignInAccount): Promise<boolean> {
 		const { session, provider, addressId } = flow;
 		if (!this.#current(flow)) return false;
 		const now = Date.now();
@@ -724,6 +779,7 @@ export class BrowserSignIn {
 			type: "signin.done",
 			provider: provider.id,
 			displayName: account.displayName,
+			...(account.kind === undefined ? {} : { kind: account.kind }),
 			member: record.memberId,
 		});
 		void this.#announce(record.group);
@@ -733,9 +789,13 @@ export class BrowserSignIn {
 		return true;
 	}
 
-	#backToExtension(flow: Flow, ok: boolean): Response {
+	/** The extension's redirect URL with one parameter: the completion code or the reason. */
+	#backToExtension(
+		flow: Flow,
+		param: { signin: string } | { signin_error: SignInRedirectError },
+	): Response {
 		const url = new URL(flow.redirectUrl);
-		url.searchParams.set("signin", ok ? "done" : "failed");
+		for (const [k, v] of Object.entries(param)) url.searchParams.set(k, v);
 		return new Response(null, {
 			status: 302,
 			headers: {
@@ -786,6 +846,10 @@ export class BrowserSignIn {
 		for (const [state, flow] of this.#flows) {
 			if (flow.expiresAt > now) break;
 			this.#dropFlow(state);
+		}
+		for (const [code, completion] of this.#completions) {
+			if (completion.expiresAt > now) break;
+			this.#completions.delete(code);
 		}
 	}
 

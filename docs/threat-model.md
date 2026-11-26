@@ -1112,17 +1112,21 @@ reaches.
   to a group, such a member can receive their calls and answer them. The provider's own
   protection of the account (a second factor, Conditional Access for work accounts) is
   what stands in front of it.
-- **A sign-in link is a credential to hand out.** The relay's URL from `signin.url`
-  works once, for 10 minutes, and belongs to the session that asked for it: whoever opens
-  it and signs in binds *that session's* browser to *their* account. Someone who gets a
-  user to open their link (sent as "sign in to tab-mcp") and to finish the provider's
-  sign-in puts their own browser into the user's group, and their session is told the
-  user's display name. What stands against it: the provider's account chooser and
-  consent show the relay's name (`prompt=select_account`), the link is single use and
-  short-lived, the new member is announced to every member, and any member can remove
-  it. A confirmation page at the relay was not added (an open item of DEC-231). A link
-  that someone else has already opened is refused, and a sign-in that comes back in
-  another browser than the one that opened the link (its cookie missing) binds nothing.
+- **Someone else's sign-in link.** The relay's URL from `signin.url` works once, for
+  10 minutes, and belongs to the session that asked for it. Someone who gets a user to
+  open their link (sent as "sign in to tab-mcp") and to finish the provider's sign-in
+  gets nothing from it: the relay binds only when the extension hands back the
+  completion code of the redirect URL (`signin.complete`), and that URL
+  (`*.chromiumapp.org`, `*.extensions.allizom.org`) is never loaded by a browser; only
+  the `launchWebAuthFlow` that the extension started sees it. In the user's browser the
+  code stays in the address bar of a page that does not load. The stranger's session is
+  told nothing, nothing is bound, and the user's display name never leaves the relay.
+  A code works once, for 2 minutes, and only for the session whose sign-in made it.
+  Besides, a link that someone else has already opened is refused, and a sign-in that
+  comes back in another browser than the one that opened the link (its cookie missing)
+  ends on an error page. Left over: someone who can read the user's address bar, or who
+  gets them to paste the code, and who holds the session the link was made for, can
+  still complete it within the 2 minutes.
 - **Mix-up and replay.** Each flow has its own `state` (with the provider in it, so the
   callback knows which provider's code it is), PKCE S256 and, for OpenID Connect, a
   `nonce`; the code is redeemed at the provider the flow started with, and the ID token
@@ -1135,8 +1139,12 @@ reaches.
   redirect URL: for a Chrome or Edge page `https://<its id>.chromiumapp.org/`, for a
   Firefox page `https://<40 hex digits>.extensions.allizom.org/` (Firefox's
   per-installation origin does not show which one is the extension's own, so any
-  extension's is accepted there). The URL carries `signin=done` or `signin=failed` and
-  nothing else; the result goes to the session over its WebSocket.
+  extension's is accepted there). The URL carries the completion code (`signin=`) or a
+  reason (`signin_error=`) and nothing else; the display name goes to the session over
+  its WebSocket, after `signin.complete`. On Firefox another extension's redirect URL is
+  accepted, but that extension's `launchWebAuthFlow` did not start this sign-in, so the
+  URL ends in no extension's hands and its code is useless to the session's holder
+  unless they get it some other way.
 - **Who can sign in.** Only sessions of the configured apps, only from an extension's
   origin, and only when the session asks for it in `hello`. A Firefox extension's app
   cannot be reserved (`moz-extension://*`, A11, A13), so any Firefox extension can name
@@ -1243,9 +1251,8 @@ each default.
 - With identity binding: a taken-over account at the provider, a leaked assertion key or
   a web app that vouches for the wrong user (A12).
 - With browser sign-in: a taken-over account at Google, Microsoft or GitHub puts a
-  browser of its own into the account's group; so does a user who finishes the sign-in
-  of someone else's link. Every member sees the new member and can remove it; any member
-  can also rename or remove the others. A copy of the store tells which public GitHub
+  browser of its own into the account's group. Every member sees the new member and can
+  remove it; any member can also rename or remove the others. A copy of the store tells which public GitHub
   accounts signed in (A16).
 - With the tab-mcp browser extension: a tool that runs without asking (marked read-only by the page,
   or with its "Always allow" switch on for its site) does whatever the AI app asks of it, and another program on

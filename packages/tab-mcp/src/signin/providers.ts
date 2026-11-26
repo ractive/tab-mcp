@@ -34,6 +34,12 @@ export interface SignInAccount {
 	key: string;
 	/** What the browser shows as "Signed in as …"; never stored. */
 	displayName: string;
+	/**
+	 * Microsoft only: a personal account (the consumer tenant) or a work or
+	 * school account. One address can name both, as two accounts with the
+	 * same `preferred_username`, so the name alone does not tell them apart.
+	 */
+	kind?: "personal" | "work";
 }
 
 /** One flow's secrets, made by the relay when the browser starts. */
@@ -226,9 +232,11 @@ function microsoft(
 			if (!GUID.test(oid)) {
 				throw new OidcError("id_token_oid", "the ID token's oid is no GUID");
 			}
+			const tid = claim(p, "tid");
 			return {
-				key: accountKey("microsoft", [claim(p, "tid"), oid]),
+				key: accountKey("microsoft", [tid, oid]),
 				displayName: shown(p["preferred_username"], "Microsoft account"),
+				kind: tid === MICROSOFT_PERSONAL_TENANT ? "personal" : "work",
 			};
 		},
 	});

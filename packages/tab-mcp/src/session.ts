@@ -488,6 +488,7 @@ export class TabSession {
 				await this.#serialIdentity(() => this.#host.signOut(this));
 				return;
 			case "signin.start":
+			case "signin.complete":
 			case "signin.out":
 			case "member.rename":
 			case "member.remove": {
@@ -497,11 +498,13 @@ export class TabSession {
 				await this.serialSignIn(() =>
 					msg.type === "signin.start"
 						? signIn.start(this, msg.provider, msg.redirectUrl, msg.label)
-						: msg.type === "signin.out"
-							? signIn.signOut(this)
-							: msg.type === "member.rename"
-								? signIn.rename(this, msg.member, msg.label)
-								: signIn.remove(this, msg.member),
+						: msg.type === "signin.complete"
+							? signIn.complete(this, msg.code)
+							: msg.type === "signin.out"
+								? signIn.signOut(this)
+								: msg.type === "member.rename"
+									? signIn.rename(this, msg.member, msg.label)
+									: signIn.remove(this, msg.member),
 				);
 				return;
 			}

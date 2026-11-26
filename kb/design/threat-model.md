@@ -576,11 +576,12 @@ gets any of it.
   AI apps connect to groups (PR 3), it can receive their calls. Every member sees it and
   can remove it.
 - The relay's sign-in URL is single use, 10 minutes, cookie-bound to the browser that
-  opened it, and bound to the session that asked for it: a user who opens someone else's
-  link and finishes the sign-in puts that person's browser into their own group (and
-  that session learns the user's display name). Mitigated by the provider's account
-  chooser, the announcement to every member and removal; no confirmation page at the
-  relay (open, DEC-231).
+  opened it, and bound to the session that asked for it. The relay binds only when the
+  extension hands back the completion code of the redirect URL (`signin.complete`, 2
+  minutes, once, that session only); the redirect URL is never loaded, only the
+  extension's `launchWebAuthFlow` sees it. A user who finishes someone else's link
+  therefore binds nothing and tells that session nothing, their display name included
+  (DEC-231).
 - A member sees labels, member ids, sign-in times and who is online, never address ids,
   tabs or display names; any member can rename or remove any other.
 - The store keeps an unkeyed SHA-256 of prefix, provider and stable id (the relay has no
@@ -732,9 +733,9 @@ is A15 in `docs/threat-model.md` (DEC-122 to DEC-126, DEC-164 to DEC-167).
   page wrote them (cut, prefixed, marked); a read-only claim is the page's (A13).
 - The known Claude header bug tolerance (decision log) slightly widens what the relay
   accepts; it is limited to one exact version pair.
-- Browser sign-in (A16): a taken-over provider account, or a user who finishes the
-  sign-in of someone else's link, adds a browser to the group; members can rename and
-  remove each other; a store copy reveals which public GitHub accounts signed in.
+- Browser sign-in (A16): a taken-over provider account adds a browser to the group;
+  members can rename and remove each other; a store copy reveals which public GitHub
+  accounts signed in.
 
 # Citations
 

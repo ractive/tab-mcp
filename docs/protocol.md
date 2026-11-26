@@ -177,8 +177,9 @@ as by a relay without sign-in.
 | `session` | R→T | `signIn: {providers, member?}` | `providers`: the providers this relay offers, in the order to show them, each `{id, name}` (`google` "Google", `microsoft` "Microsoft", `github` "GitHub"). `member`: this browser's member id while it is signed in; a `group` message follows the `session`. Without `member` the browser is not signed in (or the relay could not read its sign-in, logged as `store.error`; it then counts as signed out until it connects again). |
 | `signin.start` | T→R | `provider`, `redirectUrl`, `label?` | Start a sign-in. `redirectUrl` is the extension's `identity.getRedirectURL()` without a path, and must be its own: `https://<extension id>.chromiumapp.org/` for a page of `chrome-extension://<extension id>` (Chrome, Edge), `https://<40 hex digits>.extensions.allizom.org/` for a page of `moz-extension://` (Firefox). `label` (1-64 characters, cleaned of invisible characters) names the browser in its group, e.g. "Chrome on macOS"; default "Browser". A new `signin.start` ends the session's open sign-in. Answered with `signin.url` or `signin.failed`. |
 | `signin.url` | R→T | `provider`, `url`, `expiresAt` | The URL to open with `identity.launchWebAuthFlow` (interactive): the relay's own, `https://<relay>/signin?flow=…`. It works once, until `expiresAt` (10 minutes). |
-| `signin.done` | R→T | `provider`, `displayName`, `member` | The browser is signed in. `displayName` is what to show as "Signed in as …": Google's `email`, Microsoft's `preferred_username`, GitHub's login. The relay does not keep it and sends it only here; the tab keeps it if it wants to show it later. `member` is this browser's member id. A `group` message follows. |
-| `signin.failed` | R→T | `provider?`, `reason`, `message` | The sign-in did not happen. `reason`: `not_offered` (no such provider here), `bad_redirect` (the redirect URL is not the extension's, or the page is no extension), `rate_limited`, `busy` (too many sign-ins open on the relay), `provider_unavailable` (its metadata cannot be fetched), `provider_error` (the provider sent the browser back without a code: cancelled, refused), `unchecked` (the code or the ID token did not check out), `browser` (the sign-in came back in another browser than the one that opened the URL), `group_full` (the account has 16 browsers), `store_unavailable`. `message` is a fixed text per reason. A binding the browser had stays. |
+| `signin.complete` | T→R | `code` | The completion code from the redirect URL that ended `launchWebAuthFlow` (`redirectUrl?signin=<code>`). Only now does the relay bind: the code must come from a sign-in this same session started, be unused and at most 2 minutes old. Any use spends it. Answered with `signin.done`, or `signin.failed` (`code_refused`, `group_full`, `store_unavailable`). |
+| `signin.done` | R→T | `provider`, `displayName`, `kind?`, `member` | The browser is signed in. `displayName` is what to show as "Signed in as …": Google's `email`, Microsoft's `preferred_username`, GitHub's login. `kind`, for Microsoft only: `personal` (the token's `tid` is the consumer tenant `9188040d-6c67-4c5b-b112-36a304b66dad`) or `work` (work or school). One address can name both a personal account and a work account; they are two accounts and two groups, with the same `displayName`, so a tab shows the kind beside the name. The relay keeps neither and sends them only here; the tab keeps them if it wants to show them later. `member` is this browser's member id. A `group` message follows. |
+| `signin.failed` | R→T | `provider?`, `reason`, `message` | The sign-in did not happen. `reason`: `not_offered` (no such provider here), `bad_redirect` (the redirect URL is not the extension's, or the page is no extension), `rate_limited`, `busy` (too many sign-ins open on the relay), `provider_unavailable` (its metadata cannot be fetched), `code_refused` (a `signin.complete` whose code is unknown, used, expired or another session's), `group_full` (the account has 16 browsers), `store_unavailable`. `message` is a fixed text per reason. A binding the browser had stays. What goes wrong between the relay's URL and the redirect back is not sent here: it comes back in the redirect URL (below). |
 | `signin.out` | T→R | none | Sign out: the binding ends. Answered with `signin.ended` `signed_out` (also when the browser was not signed in), or `error` `store_unavailable` with `for: "signin.out"`, the binding then kept. |
 | `signin.ended` | R→T | `reason` | The browser is no longer signed in: `signed_out` (its own `signin.out`), `removed` (another member removed it), `expired` (90 days after its sign-in). It may sign in again. |
 | `group` | R→T | `provider`, `self`, `expiresAt`, `maxMembers`, `members` | The group's state: to every online member when a member joins, leaves, is renamed, connects or goes offline, and to a member when it connects. `self` is this browser's member id, `expiresAt` when its sign-in ends unless it signs in again, `maxMembers` 16. `members`, oldest sign-in first, this browser included: `{id, label, online, signedInAt}`. A member id is random (`m_…`) and tells nothing about the address id. A tab ignores fields it does not know: later relays add some. |
@@ -188,8 +189,7 @@ as by a relay without sign-in.
 A `member.rename` or `member.remove` for a member that is not in this browser's group,
 or from a browser that is not signed in, gets `error` `unknown_id` with `for` and
 `member`; a store failure gets `store_unavailable` the same way. The relay handles a
-session's sign-in messages, and a sign-in that comes back for it, one after another in
-the order they came. They count against the control budget like every other message.
+session's sign-in messages one after another, in the order they came. They count against the control budget like every other message.
 
 **The flow.** The relay is the only OAuth client at the providers.
 
@@ -203,22 +203,29 @@ the order they came. They count against the control budget like every other mess
    `browser.` and names the provider; on the one callback
    `https://<relay>/authorize/callback` the relay tells its sign-ins from identity
    binding's by it.
-3. The provider sends the browser back. The relay checks the cookie (without it:
-   `browser`, and an error page instead of the redirect below), redeems the code and
-   checks the account: the ID token as for identity binding (signature, `iss`, `aud`,
-   `azp`, `exp`, `iat`, `nonce`; Microsoft's `iss` must be
-   `https://login.microsoftonline.com/{tid}/v2.0` with the token's own `tid`), or for
-   GitHub one `GET https://api.github.com/user` with the access token, which the relay
-   then drops.
-4. The relay binds the session's address id to the account, sends `signin.done` and
-   `group`, and sends the browser to `redirectUrl?signin=done` (or `signin=failed`),
-   which ends `launchWebAuthFlow`. Nothing secret is in that URL: the result reaches the
-   extension over its session.
+3. The provider sends the browser back. The relay checks the cookie (without it: an
+   error page, and no redirect), redeems the code and checks the account: the ID token
+   as for identity binding (signature, `iss`, `aud`, `azp`, `exp`, `iat`, `nonce`;
+   Microsoft's `iss` must be `https://login.microsoftonline.com/{tid}/v2.0` with the
+   token's own `tid`), or for GitHub one `GET https://api.github.com/user` with the
+   access token, which the relay then drops. It binds nothing yet and sends nothing to
+   the session.
+4. The relay sends the browser to `redirectUrl?signin=<code>`: a random completion
+   code, single use, valid 2 minutes, for this sign-in and its session. On a failure it
+   sends `redirectUrl?signin_error=<reason>` instead: `provider_error` (the provider
+   sent no code: cancelled, refused), `unchecked` (the code or the account did not
+   check out), `session_gone` (the session that started the sign-in is gone, or another
+   session of its address replaced it; nothing is redeemed then). Either URL ends
+   `launchWebAuthFlow`.
+5. The extension sends `signin.complete` with the code. The relay binds the session's
+   address id to the account and sends `signin.done` and `group`.
 
-A sign-in belongs to the session that started it. If that session is gone when the
-provider sends the browser back, or another session of the same address replaced it,
-the relay redeems nothing, binds nothing and sends the browser to
-`redirectUrl?signin=failed`. The relay's URL and the callback each work once.
+The redirect URLs (`*.chromiumapp.org`, `*.extensions.allizom.org`) are never loaded:
+the browser hands such a URL to the `launchWebAuthFlow` of the extension that started
+it, and only that extension sees the code. So someone who gets another person to open
+their sign-in link and finish it gets nothing: the code stays in that person's address
+bar, the stranger's session is never told, nothing is bound, and the display name never
+leaves the relay. The relay's URL and the callback each work once.
 
 **The account and the group.** The relay keeps a hash of the provider and the account's
 stable id, never the id itself, the e-mail address or the name: Google `iss` and `sub`,

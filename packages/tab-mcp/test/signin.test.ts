@@ -10,6 +10,7 @@ import {
 	beforeAll,
 	describe,
 	expect,
+	setSystemTime,
 	test,
 } from "bun:test";
 import { newSecret } from "../src/address.ts";
@@ -206,19 +207,44 @@ async function throughProvider(url: string, browser = new Browser()) {
 	};
 }
 
+/** The completion code in the redirect to the extension; fails on anything else. */
+function completionCode(
+	location: string,
+	redirectUrl = CHROME_REDIRECT,
+): string {
+	const url = new URL(location);
+	expect(`${url.origin}${url.pathname}`).toBe(redirectUrl);
+	expect([...url.searchParams.keys()]).toEqual(["signin"]);
+	const code = url.searchParams.get("signin") ?? "";
+	expect(code).toMatch(/^[A-Za-z0-9_-]{32}$/);
+	return code;
+}
+
+/** Start, provider, callback: the completion code, before anything is bound. */
+async function checkedCode(
+	tab: ScriptedTab,
+	provider: string,
+	options: { redirectUrl?: string; label?: string } = {},
+): Promise<string> {
+	const url = await beginSignIn(tab, provider, options);
+	const { answer } = await throughProvider(url);
+	expect(answer.status).toBe(302);
+	return completionCode(answer.location, options.redirectUrl);
+}
+
 async function signIn(
 	tab: ScriptedTab,
 	provider: string,
 	options: { redirectUrl?: string; label?: string } = {},
 ): Promise<SignInDoneMessage> {
-	const url = await beginSignIn(tab, provider, options);
-	const { answer } = await throughProvider(url);
-	expect(answer.status).toBe(302);
-	expect(answer.location).toBe(
-		`${options.redirectUrl ?? CHROME_REDIRECT}?signin=done`,
-	);
+	const code = await checkedCode(tab, provider, options);
+	tab.send({ type: "signin.complete", code });
 	return (await tab.next("signin.done")) as SignInDoneMessage;
 }
+
+/** The redirect of a sign-in that failed before its completion code. */
+const redirectError = (reason: string, redirectUrl = CHROME_REDIRECT) =>
+	`${redirectUrl}?signin_error=${reason}`;
 
 /** The next group message whose members match. */
 async function groupWhere(
@@ -507,11 +533,19 @@ describe("signing in with Google", () => {
 		const back = await browser.get(visit.location);
 		const answer = await browser.get(back.location);
 		expect(answer.status).toBe(302);
-		expect(answer.location).toBe(`${CHROME_REDIRECT}?signin=done`);
+		const code = completionCode(answer.location);
 
+		// Nothing is bound, and nothing reaches the session, before the
+		// extension hands the code back.
+		expect(await quietFor(tab)).toEqual([]);
+		expect(await ctx.store.getBinding?.(tab.addressId, Date.now())).toBe(
+			undefined,
+		);
+		tab.send({ type: "signin.complete", code });
 		const done = (await tab.next("signin.done")) as SignInDoneMessage;
 		expect(done.provider).toBe("google");
 		expect(done.displayName).toBe("alice@gmail.example");
+		expect(done).not.toHaveProperty("kind");
 		expect(done.member).toMatch(/^m_/);
 		const group = await groupWhere(tab, (g) => g.members.length === 1);
 		expect(group).toMatchObject({
@@ -551,13 +585,12 @@ describe("signing in with Google", () => {
 			const { answer } = await throughProvider(
 				await beginSignIn(tab, "google"),
 			);
-			expect(answer.location).toBe(`${CHROME_REDIRECT}?signin=failed`);
-			const failed = (await tab.next("signin.failed")) as SignInFailedMessage;
-			expect(failed.reason).toBe("unchecked");
+			expect(answer.location).toBe(redirectError("unchecked"));
 		}
 		expect(await ctx.store.getBinding?.(tab.addressId, Date.now())).toBe(
 			undefined,
 		);
+		expect(await quietFor(tab)).toEqual([]);
 	});
 
 	test("Google's issuer without the scheme is the same account", async () => {
@@ -573,15 +606,13 @@ describe("signing in with Google", () => {
 		await groupWhere(b, (g) => g.members.length === 2);
 	});
 
-	test("the provider's refusal is told to the session, and the browser goes back to the extension", async () => {
+	test("the provider's refusal goes back to the extension in its redirect URL", async () => {
 		const ctx = start();
 		const tab = await extension(ctx);
 		fakes.deny = "access_denied";
 		const { answer } = await throughProvider(await beginSignIn(tab, "google"));
-		expect(answer.location).toBe(`${CHROME_REDIRECT}?signin=failed`);
-		expect(
-			((await tab.next("signin.failed")) as SignInFailedMessage).reason,
-		).toBe("provider_error");
+		expect(answer.location).toBe(redirectError("provider_error"));
+		expect(await quietFor(tab)).toEqual([]);
 	});
 });
 
@@ -600,17 +631,17 @@ describe("signing in with Microsoft", () => {
 			),
 		).toBe(true);
 		const back = await browser.get(visit.location);
-		expect((await browser.get(back.location)).location).toBe(
-			`${CHROME_REDIRECT}?signin=done`,
-		);
+		const code = completionCode((await browser.get(back.location)).location);
+		tab.send({ type: "signin.complete", code });
 		const done = (await tab.next("signin.done")) as SignInDoneMessage;
 		expect(done.displayName).toBe("alice@contoso.example");
+		expect(done.kind).toBe("work");
 		expect(
 			(await ctx.store.getBinding?.(tab.addressId, Date.now()))?.group,
 		).toBe(accountKey("microsoft", [fakes.microsoft.tid, fakes.microsoft.oid]));
 	});
 
-	test("a personal account (tenant 9188040d-…) is accepted", async () => {
+	test("a personal account (tenant 9188040d-…) is accepted and called personal", async () => {
 		const ctx = start();
 		fakes.microsoft = {
 			tid: MICROSOFT_PERSONAL_TENANT,
@@ -620,6 +651,33 @@ describe("signing in with Microsoft", () => {
 		const tab = await extension(ctx);
 		const done = await signIn(tab, "microsoft");
 		expect(done.displayName).toBe("alice@outlook.example");
+		expect(done.kind).toBe("personal");
+	});
+
+	test("one address as a personal and as a work account: two groups, the same name, told apart by kind", async () => {
+		const ctx = start();
+		const name = "alice@contoso.example";
+		fakes.microsoft = {
+			tid: MICROSOFT_PERSONAL_TENANT,
+			oid: "00000000-0000-0000-3333-000000000003",
+			preferred_username: name,
+		};
+		const home = await extension(ctx);
+		const personal = await signIn(home, "microsoft");
+		fakes.microsoft = {
+			tid: "72f988bf-86f1-41af-91ab-2d7cd011db47",
+			oid: "00000000-0000-0000-4444-000000000004",
+			preferred_username: name,
+		};
+		const office = await extension(ctx);
+		const work = await signIn(office, "microsoft");
+		expect(personal.displayName).toBe(work.displayName);
+		expect([personal.kind, work.kind]).toEqual(["personal", "work"]);
+		await groupWhere(home, (g) => g.members.length === 1);
+		await groupWhere(office, (g) => g.members.length === 1);
+		const a = await ctx.store.getBinding?.(home.addressId, Date.now());
+		const b = await ctx.store.getBinding?.(office.addressId, Date.now());
+		expect(a?.group).not.toBe(b?.group);
 	});
 
 	test("an issuer of another tenant than the token's tid is refused", async () => {
@@ -642,10 +700,7 @@ describe("signing in with Microsoft", () => {
 			const { answer } = await throughProvider(
 				await beginSignIn(tab, "microsoft"),
 			);
-			expect(answer.location).toBe(`${CHROME_REDIRECT}?signin=failed`);
-			expect(
-				((await tab.next("signin.failed")) as SignInFailedMessage).reason,
-			).toBe("unchecked");
+			expect(answer.location).toBe(redirectError("unchecked"));
 		}
 		expect(ctx.logs.events("signin.unchecked").map((e) => e["reason"])).toEqual(
 			["id_token_iss", "id_token_iss", "id_token_iss", "id_token_iss"],
@@ -680,7 +735,8 @@ describe("signing in with GitHub", () => {
 		expect(q.get("code_challenge_method")).toBe("S256");
 		expect(q.get("state")?.startsWith("browser.github.")).toBe(true);
 		const back = await browser.get(visit.location);
-		await browser.get(back.location);
+		const code = completionCode((await browser.get(back.location)).location);
+		tab.send({ type: "signin.complete", code });
 		const done = (await tab.next("signin.done")) as SignInDoneMessage;
 		expect(done.displayName).toBe("alice");
 		expect(fakes.githubUserRequests).toHaveLength(1);
@@ -710,10 +766,7 @@ describe("signing in with GitHub", () => {
 		const tab = await extension(ctx);
 		fakes.githubTokenError = "bad_verification_code";
 		const { answer } = await throughProvider(await beginSignIn(tab, "github"));
-		expect(answer.location).toBe(`${CHROME_REDIRECT}?signin=failed`);
-		expect(
-			((await tab.next("signin.failed")) as SignInFailedMessage).reason,
-		).toBe("unchecked");
+		expect(answer.location).toBe(redirectError("unchecked"));
 		expect(ctx.logs.events("signin.unchecked")[0]?.["reason"]).toBe(
 			"token_bad_verification_code",
 		);
@@ -738,14 +791,83 @@ describe("flows: single use, short-lived, bound to their session and browser", (
 		const visit = await browser.get(url);
 		expect((await browser.get(url)).status).toBe(400);
 		const back = await browser.get(visit.location);
-		expect((await browser.get(back.location)).status).toBe(302);
-		await tab.next("signin.done");
+		const code = completionCode((await browser.get(back.location)).location);
 		const replay = await browser.get(back.location);
 		expect(replay.status).toBe(400);
 		expect(replay.text).toContain("expired or was already used");
+		tab.send({ type: "signin.complete", code });
+		await tab.next("signin.done");
 	});
 
-	test("a callback in another browser (no cookie) is refused and tells the session", async () => {
+	test("the completion code: once, two minutes, only for the session whose flow made it", async () => {
+		const ctx = start();
+		const tab = await extension(ctx);
+		const stranger = await extension(ctx);
+		const code = await checkedCode(tab, "google");
+		// Another session with the code (it never sees it, but say it got it).
+		stranger.send({ type: "signin.complete", code });
+		const refused = (await stranger.next(
+			"signin.failed",
+		)) as SignInFailedMessage;
+		expect(refused.reason).toBe("code_refused");
+		expect(refused).not.toHaveProperty("displayName");
+		expect(await ctx.store.getBinding?.(stranger.addressId, Date.now())).toBe(
+			undefined,
+		);
+		// The code is spent by any use: the right session cannot use it after.
+		tab.send({ type: "signin.complete", code });
+		expect(
+			((await tab.next("signin.failed")) as SignInFailedMessage).reason,
+		).toBe("code_refused");
+		expect(await ctx.store.getBinding?.(tab.addressId, Date.now())).toBe(
+			undefined,
+		);
+		// A used one is refused.
+		const second = await checkedCode(tab, "google");
+		tab.send({ type: "signin.complete", code: second });
+		await tab.next("signin.done");
+		tab.send({ type: "signin.complete", code: second });
+		expect(
+			((await tab.next("signin.failed")) as SignInFailedMessage).reason,
+		).toBe("code_refused");
+		// A made-up code is refused.
+		tab.send({ type: "signin.complete", code: "x".repeat(32) });
+		expect(
+			((await tab.next("signin.failed")) as SignInFailedMessage).reason,
+		).toBe("code_refused");
+		// An expired one is refused. Last: the clock only moves forward here
+		// (a session's control budget does not take a clock going back).
+		const late = await checkedCode(tab, "github");
+		setSystemTime(Date.now() + 2 * 60_000 + 1);
+		try {
+			tab.send({ type: "signin.complete", code: late });
+			expect(
+				((await tab.next("signin.failed")) as SignInFailedMessage).reason,
+			).toBe("code_refused");
+			expect(
+				(await ctx.store.getBinding?.(tab.addressId, Date.now()))?.provider,
+			).toBe("google");
+		} finally {
+			setSystemTime();
+		}
+	});
+
+	test("someone else's link finished in a victim's browser binds nothing and tells the stranger nothing", async () => {
+		const ctx = start();
+		const stranger = await extension(ctx);
+		const url = await beginSignIn(stranger, "google");
+		// The victim opens the link and signs in, in their own browser.
+		const { answer } = await throughProvider(url, new Browser());
+		// The code lands in the victim's address bar, not in the stranger's session.
+		completionCode(answer.location);
+		expect(await quietFor(stranger)).toEqual([]);
+		expect(await ctx.store.getBinding?.(stranger.addressId, Date.now())).toBe(
+			undefined,
+		);
+		expect(ctx.logs.lines.join("\n")).not.toContain("alice@gmail.example");
+	});
+
+	test("a callback in another browser (no cookie) is refused with an error page", async () => {
 		const ctx = start();
 		const tab = await extension(ctx);
 		const url = await beginSignIn(tab, "google");
@@ -756,9 +878,7 @@ describe("flows: single use, short-lived, bound to their session and browser", (
 		const answer = await victim.get(back.location);
 		expect(answer.status).toBe(403);
 		expect(answer.location).toBe("");
-		expect(
-			((await tab.next("signin.failed")) as SignInFailedMessage).reason,
-		).toBe("browser");
+		expect(await quietFor(tab)).toEqual([]);
 		expect(await ctx.store.getBinding?.(tab.addressId, Date.now())).toBe(
 			undefined,
 		);
@@ -796,7 +916,7 @@ describe("flows: single use, short-lived, bound to their session and browser", (
 		await waitFor(() => ctx.relay.sessionCount === 0, "the session to end");
 		const redeemed = fakes.tokenRequests.length;
 		const answer = await browser.get(back.location);
-		expect(answer.location).toBe(`${CHROME_REDIRECT}?signin=failed`);
+		expect(answer.location).toBe(redirectError("session_gone"));
 		expect(await ctx.store.getBinding?.(tab.addressId, Date.now())).toBe(
 			undefined,
 		);
@@ -819,9 +939,24 @@ describe("flows: single use, short-lived, bound to their session and browser", (
 		const back = await browser.get(visit.location);
 		const newer = await extension(ctx, { secret });
 		expect((await browser.get(back.location)).location).toBe(
-			`${CHROME_REDIRECT}?signin=failed`,
+			redirectError("session_gone"),
 		);
 		expect(await quietFor(newer)).toEqual([]);
+	});
+
+	test("a session replaced after the callback cannot complete, and the newer one cannot use the code", async () => {
+		const ctx = start();
+		const secret = newSecret();
+		const tab = await extension(ctx, { secret });
+		const code = await checkedCode(tab, "google");
+		const newer = await extension(ctx, { secret });
+		newer.send({ type: "signin.complete", code });
+		expect(
+			((await newer.next("signin.failed")) as SignInFailedMessage).reason,
+		).toBe("code_refused");
+		expect(await ctx.store.getBinding?.(newer.addressId, Date.now())).toBe(
+			undefined,
+		);
 	});
 
 	test("refused starts: an unknown provider, another extension's redirect URL, a web page", async () => {
@@ -1071,10 +1206,10 @@ describe("the group", () => {
 			members.push(t);
 		}
 		const extra = await extension(ctx);
-		const { answer } = await throughProvider(
-			await beginSignIn(extra, "github"),
-		);
-		expect(answer.location).toBe(`${CHROME_REDIRECT}?signin=failed`);
+		extra.send({
+			type: "signin.complete",
+			code: await checkedCode(extra, "github"),
+		});
 		const failed = (await extra.next("signin.failed")) as SignInFailedMessage;
 		expect(failed.reason).toBe("group_full");
 		expect(failed.message).toContain("16 browsers");
@@ -1108,8 +1243,10 @@ describe("a failing store", () => {
 		const ctx = start({ store: flaky });
 		const tab = await extension(ctx);
 		failing = true;
-		const { answer } = await throughProvider(await beginSignIn(tab, "google"));
-		expect(answer.location).toBe(`${CHROME_REDIRECT}?signin=failed`);
+		tab.send({
+			type: "signin.complete",
+			code: await checkedCode(tab, "google"),
+		});
 		expect(
 			((await tab.next("signin.failed")) as SignInFailedMessage).reason,
 		).toBe("store_unavailable");
