@@ -206,6 +206,10 @@ there wait as after any other change.
       mode for a browser without sign-in
 - [ ] Focus messages (`windows.onFocusChanged`) while the group's mode asks for them
 - [ ] Notice and notification when a member joins
+- [ ] A Microsoft sign-in refused because the account's company requires an
+      administrator's approval (AADSTS65001 / AADSTS90094 and the like): the panel says
+      so in its own words ("Your organisation's administrator has to approve tab-mcp
+      relay first"), not the provider's code
 
 ### Docs and records
 
@@ -238,9 +242,13 @@ Done or known so far (2026-11-26):
   `variables.tf` as `tab_mcp_relay_microsoft_client_id`); the relay uses the `common`
   endpoint, so no tenant id is configured. Its secret goes into the Keychain item
   `ractive-ch-tab-mcp-microsoft-client-secret` and **expires on 2028-11-26** (24 months,
-  Microsoft's longest): a new one before then, or sign-in with Microsoft stops. Publisher
-  verification (for Entra ID work accounts) is still to do: ractive.ch's
-  `/.well-known/microsoft-identity-association.json` and the partner program id.
+  Microsoft's longest): a new one before then, or sign-in with Microsoft stops. No publisher
+  verification (owner, 2026-11-26: not a business; the Microsoft AI Cloud Partner Program
+  takes only companies): personal Microsoft accounts work; a work account works where
+  its company lets users consent to unverified apps, and elsewhere its IT approves the
+  app once. ractive.ch is verified as a domain in the owner's Entra tenant and serves
+  `/.well-known/microsoft-identity-association.json` (ractive.ch#168), so verification
+  can follow later without a code change.
 - **Google**: the relay's existing client from identity binding is reused
   (`tab_mcp_relay_google_client_id` in ractive.ch's `infra/tab-mcp/variables.tf`, a web
   application with the callback above; secret in `ractive-ch-tab-mcp-google-client-secret`).
