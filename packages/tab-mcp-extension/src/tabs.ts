@@ -201,6 +201,50 @@ export async function tabInFront(): Promise<TargetTab> {
 export const isSitePage = (url: string): boolean => /^https?:\/\//i.test(url);
 
 /**
+ * Tab `tabId` if it is open in a normal window (not a popup or the DevTools,
+ * which the tab in front never is either), `undefined` otherwise: a tab a
+ * call's `tab` argument or the pin may name (iteration 53). Its address and
+ * title are empty where the browser hides them from the extension.
+ */
+export async function tabInNormalWindow(
+	tabId: number,
+): Promise<TargetTab | undefined> {
+	try {
+		const tab = await chrome.tabs.get(tabId);
+		const window = await chrome.windows.get(tab.windowId);
+		if (window.type !== "normal") return undefined;
+		return { id: tabId, url: tab.url ?? "", title: tab.title ?? "" };
+	} catch {
+		return undefined;
+	}
+}
+
+/**
+ * The tabs of the normal windows, in their order, without the extension's
+ * own pages: what `list_tabs` looks through. The browser gives an address
+ * and title only of a tab the extension may read (it has no `tabs`
+ * permission): host access for its site, or the user's click there.
+ */
+export async function normalTabs(): Promise<TargetTab[]> {
+	const own = chrome.runtime.getURL("");
+	return (await chrome.tabs.query({ windowType: "normal" }))
+		.filter((tab) => tab.id !== undefined && !(tab.url ?? "").startsWith(own))
+		.map((tab) => ({
+			id: tab.id as number,
+			url: tab.url ?? "",
+			title: tab.title ?? "",
+		}));
+}
+
+/**
+ * Whether `list_tabs` may name the tab at `url`: the browser shows the
+ * extension its address (as for a tab `page_info` may read), and it is a
+ * page of an http(s) site that is not the add-on store's.
+ */
+export const mayList = (url: string): boolean =>
+	url !== "" && isSitePage(url) && !isStorePage(url);
+
+/**
  * Why the extension may not read a tab: its address is hidden (no click on
  * its icon there and no host access, or a browser page: Chrome hides both
  * alike), no click on a page whose address is known, a browser page, the

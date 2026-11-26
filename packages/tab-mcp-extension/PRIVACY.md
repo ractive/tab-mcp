@@ -1,7 +1,8 @@
 # tab-mcp browser extension: privacy policy
 
-The tab-mcp browser extension passes the WebMCP tools of the page in front on to an AI app the user
-connects, through a tab-mcp relay, and lets that AI app open pages in that tab. This page
+The tab-mcp browser extension passes the WebMCP tools of the page in front (or of a tab the user
+or the AI app pinned) on to an AI app the user connects, through a tab-mcp relay, and lets
+that AI app open pages in that tab. This page
 says what the extension reads, stores and sends. It is published by Jean-Pierre Bergamin,
 Zurich, Switzerland (james@ractive.ch), and online at
 https://ractive.ch/tab-mcp/privacy/#chrome.
@@ -15,7 +16,10 @@ origins; in Firefox until it goes to another page, a reload included), or every 
 a tab it reads the page's address (with its query and fragment, as the browser shows it),
 title and language, and the tools the page registered itself with WebMCP
 (`document.modelContext`): their names, titles, descriptions, input schemas and
-annotations (such as read-only). Apart
+annotations (such as read-only). When the AI app asks which tabs it may use
+(`list_tabs`), it reads from the browser the address and title of each such tab; the
+browser shows it those of no other tab (the extension has no `tabs` permission), so of
+the others it only counts them. Apart
 from that, what the page's own tools return when the AI app calls them, and the two
 cases below (a page that uses the tab-mcp library, and the relay's pairing page with
 "Fill in the code for me" on), it reads nothing of the page: no page text, no form
@@ -83,7 +87,8 @@ browser's settings, for which relay, so that the panel can say why it is off.
 
 ## What it stores
 
-In the extension's own IndexedDB in the browser, used by its service worker only:
+In the extension's own IndexedDB in the browser, used by its service worker only (the
+pinned tab's id alone in the browser's session storage, as said below):
 
 - the address of the relay the user chose (by default `https://tab-mcp.ractive.ch`);
 - whether AI access is on, and whether another tab or program took its place at the
@@ -98,6 +103,10 @@ In the extension's own IndexedDB in the browser, used by its service worker only
   changes;
 - the tools the user allowed to run without asking, per site: the site's origin and the
   tool names;
+- where AI apps' calls go ("the tab in front" or "a pinned tab") and, in the second
+  case, the browser's id of the pinned tab (a number, nothing of its page), kept in the
+  browser's session storage (`storage.session`), which the browser empties when it
+  starts again;
 - with "Fill in the code for me" on, the relay it is on for; when it went off because the
   user took the relay's site away in the browser's settings, that relay instead, for the
   panel's note;
@@ -116,15 +125,22 @@ To the relay the user chose, and only while AI access is on:
 
 - the connection to the relay and the connecting of an AI app (the relay stores a grant for
   each connected AI app; see the relay's own policy below);
-- what the connected AI app asks for: the address, title and language of the tab in front
-  (`page_info`; the address with its query and fragment, so a link that carries a token
-  in it is sent as it is), the list of its WebMCP tools (`webmcp_tools`), for each tool
-  call the tool's name, the arguments the AI app sent and the page's result, and after
-  the AI app opened a page in the tab, went back or forward or reloaded it, or a page
-  tool took the tab to another page, the same as `page_info` for the new page.
+- what the connected AI app asks for: the address, title and language of the tab AI
+  apps work in (the tab in front, or the pinned tab), or of another tab the extension
+  may read that the AI app names (`page_info`; the address with its query and
+  fragment, so a link that carries a token in it is sent as it is), the list of its
+  WebMCP tools (`webmcp_tools`), for each tool call the tool's name, the arguments the
+  AI app sent and the page's result, and after the AI app opened a page in the tab,
+  went back or forward or reloaded it, or a page tool took the tab to another page, the
+  same as `page_info` for the new page;
+- when the AI app lists the tabs (`list_tabs`): the address and title of every tab the
+  extension may read (with "Give access to all sites", every http(s) tab of the
+  browser's normal windows), which one is in front and which one is pinned, and of the
+  other tabs only how many there are. The browser gives the extension nothing else of
+  a tab it may not read, and nothing of such a tab is sent.
 
-The AI app can open pages in the tab in front (`navigate`, `go_back`, `go_forward`,
-`reload`). A page tool that the page does not mark read-only runs only after the user
+The AI app can open pages in the tab AI apps work in, or in another tab the extension
+may read (`navigate`, `go_back`, `go_forward`, `reload`). A page tool that the page does not mark read-only runs only after the user
 allowed it, in the side panel or a notification, or after the user allowed that tool on
 that site. A navigation to another origin runs only after the user allowed it, each time;
 a navigation on the page's own origin runs without a question, as a link on the page

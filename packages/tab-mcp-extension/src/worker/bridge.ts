@@ -6,6 +6,12 @@
  * `toolchange`; it is advisory (a page may drop a tool any time), so a call
  * to a tool that is gone answers so instead of failing the bridge.
  *
+ * "The tab in front" is the tab AI apps work in (`targets.ts`, iteration
+ * 53): the tab in front, or the pinned tab. `webmcp_tools` and `webmcp_call`
+ * with a `tab` argument for another tab read that tab's tools for the one
+ * call (`stateOf`, `callByName`), with the same rules, and leave the
+ * `page_<name>` tools offered as they are.
+ *
  * Everything that comes from the page is the page's word: names, titles,
  * descriptions, schemas, hints and results. Texts are cut and descriptions
  * start with the page's origin (checked against the address Chrome reports);
@@ -531,6 +537,13 @@ export interface BridgeOptions {
 		fact: { site: string } | { timedOut: true },
 	) => void;
 	timeoutMs?: number;
+	/**
+	 * Before a `page_<name>` tool's call: whether tab `tabId`, which the
+	 * tool was offered from, is still the tab calls go to (in mode "a pinned
+	 * tab" without a pin, it pins it: the first call pins). Without it,
+	 * always.
+	 */
+	callIn?: (tabId: number) => Promise<boolean>;
 	/** How long after a read that caught the tab between two pages it reads once more. */
 	pageChangedRetryMs?: number;
 }
@@ -625,6 +638,7 @@ export class PageToolBridge {
 	readonly #changed: () => void;
 	readonly #confirm: Confirm;
 	readonly #note: NonNullable<BridgeOptions["note"]>;
+	readonly #callIn: NonNullable<BridgeOptions["callIn"]>;
 	/** The registered tools by AI app name, with what they were made from. */
 	readonly #registered = new Map<
 		string,
@@ -634,6 +648,12 @@ export class PageToolBridge {
 	#callable = new Map<string, Callable>();
 	/** The schemas and validators of the last read, by `keyOf`. */
 	#compiled = new Map<string, Compiled>();
+	/**
+	 * Those of the last read of a tab whose tools are not offered (the
+	 * panel's tab in front while a pinned one is, a `tab` argument): read
+	 * again and again, it compiles each tool once.
+	 */
+	#otherCompiled = new Map<string, Compiled>();
 	#state: BridgeState = { available: false, tools: [] };
 	/** The refresh running, and whether another was asked for meanwhile. */
 	#running: Promise<void> | undefined;
@@ -650,6 +670,7 @@ export class PageToolBridge {
 		this.#changed = options.changed ?? (() => {});
 		this.#confirm = options.confirm ?? refuse;
 		this.#note = options.note ?? (() => {});
+		this.#callIn = options.callIn ?? (async () => true);
 		this.#timeoutMs = options.timeoutMs ?? CALL_TIMEOUT_MS;
 		this.#pageChangedRetryMs =
 			options.pageChangedRetryMs ?? PAGE_CHANGED_RETRY_MS;
@@ -689,26 +710,84 @@ export class PageToolBridge {
 	}
 
 	/**
+	 * The state of `tab` as `webmcp_tools` lists it, read again now (unless
+	 * `refresh` is false: the panel's read, after a refresh). For the tab
+	 * whose tools are offered, the bridge's own state; for another tab (a
+	 * `tab` argument, the panel's tab in front while a pinned one is
+	 * offered), a read of its own that offers nothing.
+	 */
+	async stateOf(
+		tab: TargetTab,
+		{ refresh = true }: { refresh?: boolean } = {},
+	): Promise<BridgeState> {
+		if (refresh) await this.refresh();
+		if (this.#state.tabId === tab.id) return this.#state;
+		try {
+			return (await this.#readOther(tab)).state;
+		} catch (error) {
+			return {
+				tabId: tab.id,
+				available: false,
+				tools: [],
+				error: message(error),
+			};
+		}
+	}
+
+	/**
 	 * `webmcp_call`: call the page's tool `name` (its page name) with the same
 	 * rules as its `page_<name>` tool, for AI apps that read their tool list
-	 * once and so do not see `page_<name>` tools that came later.
+	 * once and so do not see `page_<name>` tools that came later. `tab`: the
+	 * tab the call is for (a `tab` argument, or the target); one whose tools
+	 * are not the ones offered is read for this call alone. `named`: a `tab`
+	 * argument named it, so it stays the call's tab whatever comes to the
+	 * front or is pinned meanwhile.
 	 */
 	async callByName(
 		name: string,
 		args: unknown,
 		options: ToolExecuteCallbackOptions,
+		tab?: TargetTab,
+		named = false,
 	): Promise<unknown> {
 		// A page that does not answer is given up by the read itself; the AI
 		// app's cancel ends the wait too.
 		await Promise.race([this.refresh(), abortedWith(options.signal)]);
-		const callable = this.#callable.get(name);
+		let callable: Callable | undefined;
+		let state: BridgeState;
+		let now: () => Promise<Callable | undefined>;
+		if (tab === undefined || tab.id === this.#state.tabId) {
+			callable = this.#callable.get(name);
+			state = this.#state;
+			// A tab the call's `tab` argument named stays its tab throughout
+			// (DEC-230): after the question its tool is looked up there, in
+			// the offered tools only while they are still that tab's.
+			now =
+				named && tab !== undefined
+					? async () =>
+							this.#state.tabId === tab.id
+								? this.#callable.get(name)
+								: (
+										await this.#readOther(tab).catch(() => undefined)
+									)?.callable.get(name)
+					: async () => this.#callable.get(name);
+		} else {
+			const read = await Promise.race([
+				this.#readOther(tab),
+				abortedWith(options.signal),
+			]);
+			callable = read.callable.get(name);
+			state = read.state;
+			now = async () =>
+				(await this.#readOther(tab).catch(() => undefined))?.callable.get(name);
+		}
 		if (callable === undefined) {
-			const left = this.#state.tools.find(
+			const left = state.tools.find(
 				(t) => t.name === cut(name, MAX_NAME) && t.problem !== undefined,
 			);
 			throw new Error(
 				left === undefined
-					? `The page in front offers no tool ${cut(name, MAX_NAME)}; webmcp_tools lists its tools.`
+					? `The page in the tab offers no tool ${cut(name, MAX_NAME)}; webmcp_tools lists its tools.${state.error === undefined ? "" : ` (${state.error})`}`
 					: `The page's tool ${left.name} is not offered: ${left.problem}.`,
 			);
 		}
@@ -721,12 +800,13 @@ export class PageToolBridge {
 					.map((e) => `${e.instanceLocation} ${e.error}`)
 					.join("; ")}`,
 			);
-		return this.#allowedThenRun(callable, input, options);
+		return this.#allowedThenRun(callable, input, options, now);
 	}
 
 	/**
 	 * Ask first for a tool that is not read-only (both ways of calling it),
-	 * then run it if it is still the tool the user was asked about. An AI
+	 * then run it if it is still the tool the user was asked about (`now`:
+	 * the tool of that name as its tab offers it after the question). An AI
 	 * app's call goes to the page with a vouch (allowed) or, for a
 	 * read-only tool, a claim: the one place either is made (DEC-207,
 	 * DEC-224).
@@ -735,6 +815,7 @@ export class PageToolBridge {
 		callable: Callable,
 		input: unknown,
 		options: ToolExecuteCallbackOptions,
+		now: () => Promise<Callable | undefined>,
 	): Promise<unknown> {
 		const { target } = callable;
 		const { client } = options;
@@ -764,10 +845,10 @@ export class PageToolBridge {
 			// another tab in front with a tool of the same name, the tool
 			// offered again with another title, description, schema or hint)
 			// gets nothing.
-			const now = this.#callable.get(target.name);
-			if (now === undefined || !sameTool(now, callable))
+			const after = await now();
+			if (after === undefined || !sameTool(after, callable))
 				throw new Error(
-					`The page's tool ${cut(target.name, MAX_NAME)} changed while the user was asked; it did not run. webmcp_tools lists the tools of the page in front.`,
+					`The page's tool ${cut(target.name, MAX_NAME)} changed while the user was asked; it did not run. webmcp_tools lists the page's tools now.`,
 				);
 		}
 		// Allowed and still the same tool (the page may skip its own
@@ -792,6 +873,10 @@ export class PageToolBridge {
 		vouch?: Vouch,
 	): Promise<unknown> {
 		const { target } = callable;
+		// Cancelled before it reached the page: no call, whose cancel could
+		// never come (an abort that came before it is no event any more).
+		if (options.signal.aborted)
+			throw new Error(`The call to ${target.name} was cancelled.`);
 		const timeout = AbortSignal.timeout(this.#timeoutMs);
 		const signal = AbortSignal.any([options.signal, timeout]);
 		// Ends when the signal aborts, even if the page never answers (a blocked
@@ -838,6 +923,28 @@ export class PageToolBridge {
 		return resultOf(result.value ?? "");
 	}
 
+	/**
+	 * The tools of the page in `tab`. The origin is the content script's
+	 * word; what Chrome reports for the tab is not the page's. A page that
+	 * says it is another site (or a tab that navigated meanwhile) gets no
+	 * tools.
+	 */
+	async #list(tab: TargetTab): Promise<PageTools> {
+		const tools = await this.#chrome.list(tab);
+		if (originOf(tab.url) !== tools.origin)
+			throw new PageChangedError(
+				"The page in the tab changed while its tools were read; they are read again once it has loaded.",
+			);
+		return tools;
+	}
+
+	/** The tools of `tab`, a tab whose tools are not offered, for one call. */
+	async #readOther(tab: TargetTab): Promise<Made> {
+		const made = this.#make(tab, await this.#list(tab));
+		this.#otherCompiled = made.compiled;
+		return made;
+	}
+
 	async #read(): Promise<void> {
 		let tab: TargetTab;
 		let tools: PageTools;
@@ -845,14 +952,7 @@ export class PageToolBridge {
 		try {
 			tab = await this.#chrome.current();
 			readFrom = tab.id;
-			tools = await this.#chrome.list(tab);
-			// The origin is the content script's word; what Chrome reports for
-			// the tab is not the page's. A page that says it is another site
-			// (or a tab that navigated meanwhile) gets no tools.
-			if (originOf(tab.url) !== tools.origin)
-				throw new PageChangedError(
-					"The page in the tab changed while its tools were read; they are read again once it has loaded.",
-				);
+			tools = await this.#list(tab);
 		} catch (error) {
 			if (this.#stopped) return;
 			this.#offer([]);
@@ -879,6 +979,20 @@ export class PageToolBridge {
 		}
 		this.#retried = false;
 		if (this.#stopped) return;
+		const made = this.#make(tab, tools);
+		this.#offer(made.wanted, made.offered);
+		this.#callable = made.callable;
+		this.#compiled = made.compiled;
+		this.#state = made.state;
+		this.#changed();
+	}
+
+	/**
+	 * What the bridge offers of the tools `tools` of the page in `tab`: the
+	 * listing, the tools to register, the callables; the schemas compiled
+	 * once per tool as offered (`#compiled` is only read here).
+	 */
+	#make(tab: TargetTab, tools: PageTools): Made {
 		const offered: Offered[] = [];
 		const wanted: { name: string; key: string; tool: ModelContextTool }[] = [];
 		const callable = new Map<string, Callable>();
@@ -934,7 +1048,10 @@ export class PageToolBridge {
 			// The schema and its validator once per tool as offered, not on
 			// every refresh (each tab switch, each toolchange).
 			const key = keyOf(tab.id, tools.documentId, pageTool);
-			const made = this.#compiled.get(key) ?? compile(pageTool);
+			const made =
+				this.#compiled.get(key) ??
+				this.#otherCompiled.get(key) ??
+				compile(pageTool);
 			compiled.set(key, made);
 			if ("problem" in made) {
 				entry.problem = made.problem;
@@ -965,21 +1082,23 @@ export class PageToolBridge {
 			callable.set(pageTool.name, item);
 			wanted.push({ name, key, tool: this.#tool(item, name, schema) });
 		}
-		this.#offer(wanted, offered);
-		this.#callable = callable;
-		this.#compiled = compiled;
-		this.#state = {
-			tabId: tab.id,
-			documentId: tools.documentId,
-			url: tools.url,
-			origin: tools.origin,
-			available: tools.available,
-			tools: offered,
-			...(more ? { more } : {}),
-			...(tools.error ? { error: cut(tools.error, MAX_ERROR) } : {}),
-			...(tools.library ? { library: tools.library } : {}),
+		return {
+			offered,
+			wanted,
+			callable,
+			compiled,
+			state: {
+				tabId: tab.id,
+				documentId: tools.documentId,
+				url: tools.url,
+				origin: tools.origin,
+				available: tools.available,
+				tools: offered,
+				...(more ? { more } : {}),
+				...(tools.error ? { error: cut(tools.error, MAX_ERROR) } : {}),
+				...(tools.library ? { library: tools.library } : {}),
+			},
 		};
-		this.#changed();
 	}
 
 	/** Make the registered tools those of `wanted`. */
@@ -1048,10 +1167,31 @@ export class PageToolBridge {
 				// Whatever it answers is the page's.
 				untrustedContentHint: true,
 			},
-			execute: (input, options) =>
-				this.#allowedThenRun(callable, input, options),
+			// It follows the tab calls go to (it can take no `tab` argument,
+			// which could clash with the page's own): offered from a tab that
+			// is no longer that one (another was pinned since), it does not run.
+			execute: async (input, options) => {
+				if (!(await this.#callIn(callable.tabId))) {
+					void this.refresh().catch(() => {});
+					throw new Error(
+						`AI apps work in another tab now (it was pinned after ${name} was offered); ${name} did not run. webmcp_tools lists the tools of that tab.`,
+					);
+				}
+				return this.#allowedThenRun(callable, input, options, async () =>
+					this.#callable.get(callable.target.name),
+				);
+			},
 		};
 	}
+}
+
+/** What `#make` makes of a page's tools. */
+interface Made {
+	offered: Offered[];
+	wanted: { name: string; key: string; tool: ModelContextTool }[];
+	callable: Map<string, Callable>;
+	compiled: Map<string, Compiled>;
+	state: BridgeState;
 }
 
 /**

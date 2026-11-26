@@ -107,9 +107,16 @@
 		<p id="allowed-all" class="muted small" hidden>
 			tab-mcp has access to all sites. <button id="disallow-all" type="button" class="link">Remove access to all sites</button>
 		</p>
+		<div class="target">
+			<p id="target-line" class="target-line" role="status">AI apps work in: the tab in front</p>
+			<div class="buttons">
+				<button id="work-here" type="button" aria-describedby="work-here-note" hidden>Work here</button>
+			</div>
+			<p id="work-here-note" class="muted small" hidden>Pins this tab: AI apps work in it wherever you are, until you pin another.</p>
+		</div>
 	</section>
 
-	<details class="settings">
+	<details class="settings" open>
 		<summary>Settings</summary>
 		<form id="relay-form">
 			<label for="relay">Relay</label>
@@ -119,6 +126,14 @@
 			</div>
 		</form>
 		<p id="relay-problem" class="problem" hidden></p>
+		<div class="target-setting">
+			<label for="target-mode">AI apps work in</label>
+			<select id="target-mode" aria-describedby="target-mode-note">
+				<option value="front">the tab in front</option>
+				<option value="pinned">a pinned tab</option>
+			</select>
+			<p id="target-mode-note" class="muted small">A pinned tab stays where AI apps work when you switch tabs; the first call pins the tab in front, and "Work here" pins another. An AI app can also pin a tab it may use.</p>
+		</div>
 	</details>
 </main>
 <script type="module" src="./main.ts"></script>

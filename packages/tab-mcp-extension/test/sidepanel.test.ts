@@ -860,6 +860,140 @@ describe("a tab the extension may not read (the owner's words, iteration 51)", (
 	});
 });
 
+describe("a question for a tab that is not in front (DEC-230)", () => {
+	test("its card names that tab, pinned or not, as text; the short announcement says another tab; the tab in front gets no line", async () => {
+		const panel = await openPanel();
+		const other = {
+			...question("q1"),
+			inTab: { title: "Shop <b>2</b>", pinned: true },
+		};
+		panel.show(stateWith([], [other]));
+		const line = panel.$('[data-question="q1"] .in-tab');
+		expect(line?.textContent).toBe("In another tab Shop <b>2</b> (pinned)");
+		expect(line?.querySelector("b")).toBeNull();
+		await Bun.sleep(80);
+		expect(panel.$("#question-status-modal")?.textContent).toBe(
+			"Claude (claude.ai) asks to run page_place_order in another tab.",
+		);
+		panel.show(
+			stateWith(
+				[],
+				[
+					{
+						...question("q2"),
+						inTab: { title: "", pinned: false },
+						navigation: { to: "https://other.example/" },
+					},
+				],
+			),
+		);
+		expect(panel.$('[data-question="q2"] .in-tab')?.textContent).toBe(
+			"In another tab (no title)",
+		);
+		panel.show(stateWith([], [question("q3")]));
+		expect(panel.$('[data-question="q3"] .in-tab')).toBeNull();
+	});
+});
+
+describe("where AI apps work (DEC-230)", () => {
+	/** The state with the shop's tab (id 5) and `target`. */
+	const at = (target?: PanelState["target"], tabId = 5): PanelState => {
+		const s = stateWith([]);
+		return {
+			...s,
+			...(target === undefined ? {} : { target }),
+			...(s.tab ? { tab: { ...s.tab, tabId } } : {}),
+		};
+	};
+	const line = (panel: Awaited<ReturnType<typeof openPanel>>) =>
+		panel.$("#target-line")?.textContent;
+
+	test("a line, not a tooltip: the tab in front, or the pinned tab by its title", async () => {
+		const panel = await openPanel();
+		panel.show(at());
+		expect(line(panel)).toBe("AI apps work in: the tab in front");
+		expect(panel.$("#target-line")?.getAttribute("role")).toBe("status");
+		panel.show(at({ mode: "pinned" }));
+		expect(line(panel)).toBe(
+			"AI apps work in: the tab in front, pinned at their next call",
+		);
+		panel.show(at({ mode: "pinned", pinned: { tabId: 9, title: "Docs" } }));
+		expect(line(panel)).toBe("AI apps work in: Docs (pinned)");
+		panel.show(at({ mode: "pinned", pinned: { tabId: 9, title: "" } }));
+		expect(line(panel)).toBe(
+			"AI apps work in: a tab the extension may not read now (pinned)",
+		);
+		panel.show(
+			at({ mode: "pinned", pinned: { tabId: 9, title: "", closed: true } }),
+		);
+		expect(line(panel)).toContain("a pinned tab that was closed");
+		// The page's title is text, never markup.
+		panel.show(at({ mode: "pinned", pinned: { tabId: 9, title: "<b>x</b>" } }));
+		expect(panel.$("#target-line b")).toBeNull();
+	});
+
+	test("Work here: for a tab it may read that is not pinned; it waits after it came or the tab changed, then pins the tab shown", async () => {
+		const panel = await openPanel();
+		const button = () => panel.$<HTMLButtonElement>("#work-here");
+		panel.show(at({ mode: "front" }));
+		expect(button()?.hidden).toBe(false);
+		expect(panel.$("#work-here-note")?.hidden).toBe(false);
+		// It just came: a click meant for what was there pins nothing.
+		expect(disabled(button())).toBe("true");
+		panel.take();
+		button()?.click();
+		expect(panel.take()).toEqual([]);
+		panel.later(WAIT_MS);
+		expect(disabled(button())).toBeNull();
+		button()?.click();
+		expect(panel.take()).toEqual([{ type: "work-here", tabId: 5 }]);
+		// Another tab came to the front: it waits again.
+		panel.show(at({ mode: "front" }, 6));
+		expect(disabled(button())).toBe("true");
+		button()?.click();
+		expect(panel.take()).toEqual([]);
+		panel.later(WAIT_MS);
+		button()?.click();
+		expect(panel.take()).toEqual([{ type: "work-here", tabId: 6 }]);
+		// The pinned tab itself: no button.
+		panel.show(at({ mode: "pinned", pinned: { tabId: 6, title: "Shop" } }, 6));
+		expect(button()?.hidden).toBe(true);
+		// Another one pinned: there, for this one.
+		panel.show(at({ mode: "pinned", pinned: { tabId: 9, title: "Docs" } }, 6));
+		expect(button()?.hidden).toBe(false);
+		// A tab it may not read: none.
+		const s = at({ mode: "front" });
+		panel.show({
+			...s,
+			...(s.tab
+				? { tab: { ...s.tab, noAccess: "no-grant", webmcp: undefined } }
+				: {}),
+		} as PanelState);
+		expect(button()?.hidden).toBe(true);
+	});
+
+	test("the setting in Settings shows the mode and sends a change", async () => {
+		const panel = await openPanel();
+		const select = () => panel.$<HTMLSelectElement>("#target-mode");
+		panel.show(at());
+		expect(select()?.value).toBe("front");
+		expect(
+			[...(select()?.options ?? [])].map((o) => [o.value, o.textContent]),
+		).toEqual([
+			["front", "the tab in front"],
+			["pinned", "a pinned tab"],
+		]);
+		panel.show(at({ mode: "pinned" }));
+		expect(select()?.value).toBe("pinned");
+		panel.take();
+		const s = select();
+		if (s === null) throw new Error("no #target-mode");
+		s.value = "front";
+		s.dispatchEvent(new (g["Event"] as typeof Event)("change"));
+		expect(panel.take()).toEqual([{ type: "set-target-mode", mode: "front" }]);
+	});
+});
+
 describe("the Firefox build's panel", () => {
 	test("the panel speaks of Firefox, not Chrome", async () => {
 		const panel = await openPanel({ firefox: true });

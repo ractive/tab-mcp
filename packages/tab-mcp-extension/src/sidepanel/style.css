@@ -283,6 +283,17 @@ input:is([type="text"], [type="url"]) {
 	gap: var(--s2);
 }
 
+select {
+	max-width: 100%;
+	min-height: 30px;
+	padding: 4px var(--s2);
+	border: 1px solid var(--edge);
+	border-radius: var(--r-control);
+	background: var(--sheet);
+	color: var(--ink);
+	font: inherit;
+}
+
 .switch,
 .allow-switch {
 	display: inline-flex;
@@ -989,6 +1000,24 @@ button.copy {
 	margin: 0 0 var(--s1);
 }
 
+/*
+ * Where AI apps work (DEC-230): the card's last part, under a rule, so that
+ * its changes move nothing that allows something. The line, then "Work here".
+ */
+.target {
+	display: flex;
+	flex-direction: column;
+	align-items: flex-start;
+	gap: var(--s2);
+	margin-top: var(--s3);
+	padding-top: var(--s3);
+	border-top: 1px solid var(--rule);
+}
+
+.target-line {
+	overflow-wrap: anywhere;
+}
+
 /* Host access: what it is, then its button. */
 .host-access {
 	display: flex;
@@ -1119,6 +1148,14 @@ button.copy {
 .settings form {
 	display: flex;
 	flex-direction: column;
+	gap: var(--s1);
+	margin-top: var(--s3);
+}
+
+.target-setting {
+	display: flex;
+	flex-direction: column;
+	align-items: flex-start;
 	gap: var(--s1);
 	margin-top: var(--s3);
 }

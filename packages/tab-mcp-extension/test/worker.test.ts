@@ -681,6 +681,35 @@ describe("questions", () => {
 			contextMessage: "Closing this is Don't allow",
 			buttons: ["Allow once"],
 		});
+		// Not the tab in front (DEC-230): said in the message.
+		const inTab = { title: "Shop", pinned: true };
+		expect(notificationText({ ...view, inTab }, "{}").message).toBe(
+			"Claude (claude.ai) wants to run page_x in another tab.",
+		);
+		expect(
+			notificationText(
+				{ ...view, inTab, navigation: { to: "https://other.example/" } },
+				"{}",
+			).message,
+		).toBe(
+			"Claude (claude.ai) wants to take another tab to https://other.example/",
+		);
+	});
+
+	test("a question for a tab not in front carries its title, invisible characters shown and cut, and whether it is pinned (DEC-230)", async () => {
+		const questions = new Questions(fakeHost());
+		const asked = questions.ask(request(), {
+			tabId: 7,
+			origin: "https://site.test",
+			inTab: { title: `a‮b${"x".repeat(300)}`, pinned: true },
+		});
+		await settle();
+		const view = questions.list.at(-1);
+		expect(view?.inTab?.pinned).toBe(true);
+		expect(view?.inTab?.title.startsWith("a\\u202Eb")).toBe(true);
+		expect(view?.inTab?.title.length).toBe(200);
+		questions.answer(view?.id as string, "deny");
+		await asked;
 	});
 
 	test("Always allow on <host> is offered only for a page tool of an http(s) site, never for a navigation", async () => {

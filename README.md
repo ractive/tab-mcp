@@ -79,8 +79,9 @@ client library and you need nothing else. On a page without it, the tab-mcp brow
 offers your AI app the page's WebMCP tools, if the page has any. It reads a tab only
 after you click its icon there, or after you give it access to all sites. The extension
 also has tools of its own, which work on pages without tools too: `page_info` says
-which page is in front, and `navigate`, `go_back`, `go_forward` and `reload` move the
-tab.
+which page is in front, `navigate`, `go_back`, `go_forward` and `reload` move the
+tab, and `list_tabs` and `use_tab` let the AI app work in another tab it may read, or
+keep to one tab while you switch (a pinned tab).
 
 The extension reads only WebMCP tools. A page with the client library has them unless
 it sets `webmcp: false` (with older versions of the library, only with `webmcp: true`).

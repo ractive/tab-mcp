@@ -154,7 +154,7 @@ chrome.runtime.onStartup.addListener(sync);
  * until a new script takes over, and the page's own calls throw meanwhile.
  * Chrome keeps the tools itself, and its page-world polyfill outlives the
  * extension's reload. Not after a disable and enable: Firefox tells the
- * extension nothing of it, and without the `storage` permission (DEC-116) a
+ * extension nothing of it, and without a marker of its own for that a
  * first start can't be told from the event page waking; a page gets the
  * script when the worker reads its tab (`tabs.ts`) or at a click.
  */
@@ -187,20 +187,25 @@ const permissionsChanged = () => {
 };
 chrome.permissions.onAdded.addListener(permissionsChanged);
 chrome.permissions.onRemoved.addListener(permissionsChanged);
-chrome.tabs.onActivated.addListener(tabChanged);
+// Another tab in front: read again unless a tab is pinned (DEC-230).
+const frontChanged = () => withConnection((c) => c.frontChanged());
+chrome.tabs.onActivated.addListener(frontChanged);
 // What the worker kept for a tab's pairing page (DEC-213) goes with the tab.
 chrome.tabs.onRemoved.addListener((tabId) =>
 	withConnection((c) => c.tabClosed(tabId)),
 );
-chrome.tabs.onUpdated.addListener((_id, change, tab) => {
-	// Only the active tabs, and only once a page has loaded: mid-navigation
-	// there is nothing to read, and the click's grant may be on its way out.
-	if (tab.active && change.status === "complete") tabChanged();
+chrome.tabs.onUpdated.addListener((id, change, tab) => {
+	// Only the active tabs and the pinned one, and only once a page has
+	// loaded: mid-navigation there is nothing to read, and the click's grant
+	// may be on its way out.
+	if (change.status === "complete")
+		withConnection((c) => c.pageChanged(id, tab.active));
 });
-chrome.windows.onFocusChanged.addListener(tabChanged);
+chrome.windows.onFocusChanged.addListener(frontChanged);
 
 // Content scripts may say only this: the page's tools changed (`toolchange`)
-// in an active tab, or the page announced the client library and asks what
+// (it counts in an active tab or the pinned one), or the page announced the
+// client library and asks what
 // the extension tells such a page (DEC-207). Commands come only over the
 // side panel's port.
 chrome.runtime.onMessage.addListener(
@@ -212,11 +217,10 @@ chrome.runtime.onMessage.addListener(
 			);
 			return true; // answers asynchronously
 		}
-		if (
-			isContentEvent(message, sender, chrome.runtime.id) &&
-			sender.tab?.active
-		)
-			tabChanged();
+		const id = sender.tab?.id;
+		const active = sender.tab?.active === true;
+		if (isContentEvent(message, sender, chrome.runtime.id) && id !== undefined)
+			withConnection((c) => c.pageChanged(id, active));
 		return false;
 	},
 );

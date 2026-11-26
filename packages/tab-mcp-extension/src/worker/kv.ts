@@ -2,9 +2,10 @@
  * The extension's settings in IndexedDB, in the extension's own origin and
  * used from the service worker only (DEC-116). Content scripts run in the
  * page's origin and cannot reach it, whatever Chrome's version and from the
- * first moment of a browser start. The extension asks for no `storage`
- * permission: there is no `chrome.storage` area a content script could read
- * or write.
+ * first moment of a browser start. The extension writes nothing into
+ * `chrome.storage.local` or `sync`, which content scripts could read; its
+ * `storage` permission is for `storage.session` alone, the pinned tab of
+ * one browser session (DEC-230), which content scripts cannot reach.
  */
 
 /** What the worker keeps: a key, a value that IndexedDB can clone. */

@@ -44,6 +44,7 @@ import {
 	parseCommand,
 	SERVER_NAME,
 	type TabView,
+	type TargetView,
 	type WorkerMessage,
 } from "../protocol.ts";
 import { relayProblem } from "../relay.ts";
@@ -57,8 +58,10 @@ import {
 	giveWebMCP,
 	isSitePage,
 	NoAccessError,
+	normalTabs,
 	type TargetTab,
 	tabInFront,
+	tabInNormalWindow,
 } from "../tabs.ts";
 import {
 	type AllowedTools,
@@ -68,7 +71,7 @@ import {
 	setAllowed,
 	setAllowedMany,
 } from "./allowed.ts";
-import { type LookedUp, PageToolBridge } from "./bridge.ts";
+import { type BridgeState, type LookedUp, PageToolBridge } from "./bridge.ts";
 import { RunningCalls } from "./calls.ts";
 import { decide } from "./decide.ts";
 import {
@@ -102,7 +105,9 @@ import {
 	saveRelay,
 	saveReplaced,
 } from "./settings.ts";
-import { createTools, INSTRUCTIONS } from "./tools.ts";
+import { tabTools } from "./tab-tools.ts";
+import { chromeSession, kvTargetStore, Targets } from "./targets.ts";
+import { createTools, INSTRUCTIONS, tabOf } from "./tools.ts";
 
 /** What a Disconnect while not connected says (it did nothing). */
 export const DISCONNECT_WHILE_DOWN =
@@ -187,16 +192,18 @@ export function panelStatus(s: StatusInput): PanelState["status"] {
 
 /**
  * A navigation tool whose call "Recent calls" names with the site of the
- * tab in front as it starts, the tab it acts on (DEC-226).
+ * tab it acts on as it starts (DEC-226).
  */
 function withSite(
 	tool: ModelContextTool,
 	recent: RecentCalls,
+	targets: Targets,
 ): ModelContextTool {
 	return {
 		...tool,
 		execute: (input, options) => {
-			void tabInFront()
+			void targets
+				.peek(tabOf(input))
 				.then((tab) => {
 					const { origin } = new URL(tab.url);
 					if (origin !== "null") recent.note(options.signal, { site: origin });
@@ -261,7 +268,16 @@ export class Connection {
 	#commands: Promise<void> = Promise.resolve();
 	#allSites = false;
 	#tab: TabView | undefined;
+	/**
+	 * The tools of the tab the panels show, as `#tab` lists them: the
+	 * bridge's state, or a read of their own where calls go to another tab
+	 * (a pinned one).
+	 */
+	#tabTools: BridgeState | undefined;
+	#target: TargetView | undefined;
 	#tabRead = 0;
+	/** Where calls go: the tab in front or a pinned tab (DEC-230). */
+	readonly #targets: Targets;
 	/** WebMCP given late, where a page read has none (DEC-223). */
 	readonly #late = new LateWebMCP(
 		giveWebMCP,
@@ -300,6 +316,25 @@ export class Connection {
 		this.#relay = relay;
 		this.#replaced = replaced;
 		this.#questions = new Questions(this.#questionsHost());
+		// A change of the mode or the pin: the bridge offers the tools of the
+		// tab calls go to now, and the panels show it.
+		this.#targets = new Targets(
+			kvTargetStore(kv, chromeSession()),
+			{
+				front: tabInFront,
+				tab: tabInNormalWindow,
+				// The rule of use_tab: page_info would answer.
+				mayPin: (tab) =>
+					askPage(tab).then(
+						() => true,
+						() => false,
+					),
+			},
+			() => {
+				this.tabChanged();
+				void this.#readTab();
+			},
+		);
 		this.#filler = new CodeFiller(this.#fillHost(), {
 			grants: grants.map((g) => g.grantId),
 		});
@@ -376,13 +411,15 @@ export class Connection {
 		// Every tool of the extension's, the page's too, binds its call for
 		// "Recent calls" as it runs (DEC-226).
 		const recent = this.#recent;
+		const targets = this.#targets;
 		const bridge = new PageToolBridge(
 			{
 				registerTool: (tool, options) =>
 					mcp.registerTool(recent.wrap(tool), options),
 			},
 			{
-				current: tabInFront,
+				// The tab calls go to: the tab in front, or the pinned tab.
+				current: () => targets.peek(),
 				// A page without WebMCP gets the extension's own now, where it
 				// may (DEC-223); its toolchange then has it read again.
 				list: async (tab) => {
@@ -407,18 +444,27 @@ export class Connection {
 				changed: () => void this.#readTab(),
 				confirm: (request, tool) => this.#decide(request, tool),
 				note: (signal, fact) => recent.note(signal, fact),
+				callIn: (tabId) => targets.callIn(tabId),
 			},
 		);
 		for (const tool of createTools(
-			{ current: tabInFront, page: askPage },
+			{ current: (tab) => targets.forCall(tab), page: askPage },
 			() => bridge,
+		))
+			void mcp.registerTool(recent.wrap(tool));
+		// The tabs an AI app may use, and pinning one (DEC-230).
+		for (const tool of tabTools(
+			targets,
+			{ tabs: normalTabs, front: tabInFront, page: askPage },
+			() => bridge.refresh(),
 		))
 			void mcp.registerTool(recent.wrap(tool));
 		// Navigation (iteration 27, DEC-121): to another origin it asks
 		// through the same questions, never "allowed".
 		for (const tool of navigationTools(
 			{
-				current: tabInFront,
+				target: (tab) => targets.forCall(tab),
+				current: (tab) => targets.peek(tab),
 				tab: getTab,
 				page: askPage,
 				history: askHistory,
@@ -427,7 +473,7 @@ export class Connection {
 			(request, where) => this.#ask(request, where),
 			() => bridge.refresh(),
 		))
-			void mcp.registerTool(recent.wrap(withSite(tool, recent)));
+			void mcp.registerTool(recent.wrap(withSite(tool, recent, targets)));
 		// A new connection is not up yet: it reads the page once it is, or
 		// for a panel (`#readsWanted`).
 		if (this.#panels.size > 0) void bridge.refresh();
@@ -443,9 +489,33 @@ export class Connection {
 		where: Parameters<Questions["ask"]>[1],
 	): ReturnType<Questions["ask"]> {
 		this.#recent.note(request.signal, { waiting: true });
-		const answer = await this.#questions.ask(request, where);
+		const inTab =
+			where.tabId === undefined ? undefined : await this.#otherTab(where.tabId);
+		const answer = await this.#questions.ask(request, {
+			...where,
+			...(inTab !== undefined ? { inTab } : {}),
+		});
 		this.#recent.note(request.signal, { answer });
 		return answer;
+	}
+
+	/**
+	 * For a question about tab `tabId`: its title, and whether it is the
+	 * pinned tab, if it is not the tab in front (DEC-230); else `undefined`.
+	 */
+	async #otherTab(
+		tabId: number,
+	): Promise<{ title: string; pinned: boolean } | undefined> {
+		const front = await tabInFront().catch(() => undefined);
+		if (front?.id === tabId) return undefined;
+		const [tab, setting] = await Promise.all([
+			getTab(tabId),
+			this.#targets.setting(),
+		]);
+		return {
+			title: tab?.title ?? "",
+			pinned: setting.mode === "pinned" && setting.pin === tabId,
+		};
 	}
 
 	/**
@@ -626,6 +696,34 @@ export class Connection {
 	tabChanged(): void {
 		// The bridge reads the tab again for the panels after its refresh.
 		if (this.#readsWanted()) void this.#bridge.refresh();
+	}
+
+	/**
+	 * Another tab came to the front, or another window took the focus. With
+	 * a tab pinned, the tools offered are the pin's and stay so: they are not
+	 * read again (every read is a moment for Chromium issue 585631961,
+	 * DEC-177); only the panels read the new tab in front.
+	 */
+	frontChanged(): void {
+		void this.#targets.setting().then((setting) => {
+			if (setting.mode === "pinned" && setting.pin !== undefined)
+				void this.#readTab();
+			else this.tabChanged();
+		});
+	}
+
+	/**
+	 * The page in tab `tabId` loaded or changed its tools: read again if it
+	 * is the tab whose tools are offered, the tab in front (`active`) or,
+	 * with a tab pinned, the pinned one; with a tab pinned, the panels read
+	 * the tab in front of their own.
+	 */
+	pageChanged(tabId: number, active: boolean): void {
+		void this.#targets.setting().then((setting) => {
+			const pin = setting.mode === "pinned" ? setting.pin : undefined;
+			if (pin === undefined ? active : pin === tabId) this.tabChanged();
+			else if (active) void this.#readTab();
+		});
 	}
 
 	/**
@@ -825,7 +923,9 @@ export class Connection {
 				// not taken on trust.
 				let names = command.names;
 				if (command.on) {
-					const state = this.#bridge.state;
+					// The tools the panels list: the bridge's, or those of the
+					// tab in front where calls go to a pinned one.
+					const state = this.#tabTools ?? this.#bridge.state;
 					if (state.origin !== command.origin) return;
 					const wanted = new Set(command.names);
 					names = state.tools
@@ -856,6 +956,21 @@ export class Connection {
 				await this.#fill.forget(this.#relay, command.host);
 				this.#changed();
 				return;
+			case "set-target-mode":
+				await this.#targets.setMode(command.mode);
+				return;
+			case "work-here": {
+				// Only the tab the panels show now: a click on a tab shown
+				// before (the user switched since) pins nothing.
+				if (this.#tab?.tabId !== command.tabId) return;
+				const tab = await tabInNormalWindow(command.tabId);
+				if (tab === undefined) return;
+				// Only a tab the extension may read, as use_tab: this throws
+				// why not, which the panel shows as the problem.
+				await askPage(tab);
+				await this.#targets.use(tab.id);
+				return;
+			}
 		}
 	}
 
@@ -1076,6 +1191,9 @@ export class Connection {
 		this.#late.closed(tabId);
 		this.#unasked.tabClosed(tabId);
 		this.#quietFails.delete(tabId);
+		// The pinned tab closed: its tools go, and the panels say so. The pin
+		// stays, so calls fail instead of going elsewhere (DEC-230).
+		this.pageChanged(tabId, false);
 	}
 
 	/** The extension's parts of the library's fill-in (DEC-206). */
@@ -1141,13 +1259,18 @@ export class Connection {
 	async #readTab(): Promise<void> {
 		if (this.#panels.size === 0) return;
 		const read = ++this.#tabRead;
-		const allSites = await chrome.permissions.contains(ALL_SITES);
+		const [allSites, target] = await Promise.all([
+			chrome.permissions.contains(ALL_SITES),
+			this.#targetView(),
+		]);
 		let tab: TargetTab;
 		try {
 			tab = await tabInFront();
 		} catch {
 			if (read !== this.#tabRead) return;
 			this.#allSites = allSites;
+			this.#target = target;
+			this.#tabTools = undefined;
 			this.#tab = {
 				title: "No tab",
 				host: "",
@@ -1159,6 +1282,7 @@ export class Connection {
 			return;
 		}
 		let view: TabView;
+		let tools: BridgeState | undefined;
 		let host = "";
 		let tabOrigin: string | undefined;
 		try {
@@ -1170,7 +1294,13 @@ export class Connection {
 		}
 		try {
 			const page = await askPage(tab);
-			const state = this.#bridge.state;
+			// The bridge's last read, or, where calls go to another tab (a
+			// pinned one), a read of the tab in front of its own: the panel
+			// lists the tools of the tab it shows.
+			let state = this.#bridge.state;
+			if (state.tabId !== tab.id && target.pinned?.tabId !== undefined)
+				state = await this.#bridge.stateOf(tab, { refresh: false });
+			tools = state;
 			// The bridge's last read is of this tab and its site. Not the
 			// address: a pushState or #part changes it without a new read
 			// (EQ 12), and the tools stay the page's.
@@ -1236,8 +1366,24 @@ export class Connection {
 		}
 		if (read !== this.#tabRead) return;
 		this.#allSites = allSites;
+		this.#target = target;
+		this.#tabTools = tools;
 		this.#tab = view;
 		this.#changed();
+	}
+
+	/** Where calls go, for the panels: the mode, and the pinned tab's title. */
+	async #targetView(): Promise<TargetView> {
+		const { mode, pin } = await this.#targets.setting();
+		if (mode === "front" || pin === undefined) return { mode };
+		const tab = await tabInNormalWindow(pin);
+		return {
+			mode,
+			pinned:
+				tab === undefined
+					? { tabId: pin, title: "", closed: true }
+					: { tabId: pin, title: tab.title },
+		};
 	}
 
 	// --- State ---
@@ -1278,6 +1424,7 @@ export class Connection {
 				? { fillAnswered: this.#fillAnswered }
 				: {}),
 			...(this.#tab !== undefined ? { tab: this.#tab } : {}),
+			...(this.#target !== undefined ? { target: this.#target } : {}),
 			questions: this.#questions.list.map(({ args: _, ...q }) => q),
 			expired: this.#questions.expired,
 		};
@@ -1299,7 +1446,10 @@ export class Connection {
 			apps: on
 				? mcp.grants.map((g) => ({ name: g.client.name, host: g.client.host }))
 				: [],
-			whileInFront: true,
+			// An AI app reaches a tab that is not in front too (a pinned
+			// one, a call's tab argument), in either mode: the page does not
+			// say "while this tab is in front" (DEC-230).
+			whileInFront: false,
 		};
 	}
 

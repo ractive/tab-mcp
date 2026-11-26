@@ -80,12 +80,19 @@ export function setReady(root: ParentNode, ready: boolean): void {
 
 /** What a screen reader is told when a question comes (EQ 11). */
 export function questionAnnouncement(
-	q: Pick<QuestionView, "app" | "tool" | "navigation" | "pairing">,
+	q: Pick<QuestionView, "app" | "tool" | "navigation" | "pairing" | "inTab">,
 ): string {
 	if (q.pairing) return `${q.app} asks to connect.`;
+	const where = q.inTab === undefined ? "" : " in another tab";
 	return q.navigation
-		? `${q.app} asks to take the tab to another site.`
-		: `${q.app} asks to run ${q.tool}.`;
+		? `${q.app} asks to take ${q.inTab === undefined ? "the tab" : "another tab"} to another site.`
+		: `${q.app} asks to run ${q.tool}${where}.`;
+}
+
+/** The tab of a question that is not the tab in front: its title, "(pinned)" if it is. */
+export function inTabText(inTab: { title: string; pinned: boolean }): string {
+	const title = inTab.title === "" ? "(no title)" : inTab.title;
+	return inTab.pinned ? `${title} (pinned)` : title;
 }
 
 /** What a question nobody answered in time leaves behind (EQ 13). */
@@ -160,6 +167,10 @@ export function questionCard(
 		if (q.title)
 			card.append(line("Title (from the page)", q.title, "title muted small"));
 	}
+	// Not the tab in front (DEC-230): which one, so that two tabs of one
+	// site are not taken for each other. The tab's title is the page's text.
+	if (q.inTab !== undefined && !q.pairing)
+		card.append(line("In another tab", inTabText(q.inTab), "in-tab small"));
 	// A pairing question has no arguments to show.
 	const details: HTMLElement[] = [];
 	if (!q.pairing) {

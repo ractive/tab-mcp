@@ -508,11 +508,16 @@ did, by connecting the extension.
   that database, in any Chrome version and from the first moment of a browser start, so
   a page's compromised renderer, running code in the content script's world, can neither
   read the secret (and take the extension's place from anywhere) nor allow its own tools.
-  The extension asks for no `storage` permission (ext/review-fixes): without it there is
-  no `chrome.storage` area at all, so nothing a content script could write there (where
-  the owner's development builds once kept the settings) can be picked up, and the
-  `TRUSTED_CONTEXTS` layer is gone with it; an end-to-end test checks that
-  `chrome.storage` is undefined in the content script's world and the worker. A one-off
+  Up to iteration 53 the extension asked for no `storage` permission (ext/review-fixes),
+  so there was no `chrome.storage` area at all. Since DEC-230 it has the permission for
+  `storage.session` alone, the pinned tab's id for one browser session, kept at the
+  default access level (trusted contexts: not a content script's world). It reads
+  nothing from `storage.local` or `sync`, the areas a content script could write, so
+  nothing written there (where the owner's development builds once kept the settings)
+  is picked up; a unit test checks that no code but `worker/targets.ts` uses
+  `chrome.storage`, and that only through `session`. A compromised renderer that got
+  past the access level could at most set the pin, to a tab the extension may read
+  (the questions still ask). A one-off
   import from that area was never kept: its "migrated" marker would live in the
   database it guards. The worker's connection to the database is opened again when
   Chrome closes it under the worker (a deletion, a version change), instead of being

@@ -766,6 +766,16 @@ like any other, `chrome-extension://<id>` (A11).
   http(s) pages, no `file:` pages and no Incognito tabs. The page's address goes to the
   AI app (`page_info`, navigation results) with its query and fragment, without a
   question, so a token in a link (a magic link, an OAuth callback) goes with it.
+- **Which tab (DEC-230).** Calls go to the tab in front, or, if the user chose "a pinned
+  tab" (or the AI app called `use_tab`), to the pinned tab wherever the user is; a
+  call's `tab` argument reaches any other tab the extension may read. `list_tabs`
+  gives the AI app the address and title of every tab the extension may read (all of
+  them with "Give access to all sites"), not only the one in front, and of the others
+  only how many there are: the extension has no `tabs` permission, so the browser gives
+  it nothing of a tab it may not read, and `use_tab` and `tab` refuse such a tab as
+  `page_info` does. A pinned tab that was closed fails the call; nothing goes to
+  another tab instead. The rules of every call are those of the tab it goes to: the
+  questions, "Always allow" per site, the navigation questions.
 - **Navigation.** `navigate`, `go_back`, `go_forward` and `reload` act only on a tab the
   extension may read. A page's text could tell the AI app to open another site: on the
   page's own origin a navigation runs without asking (as a link on the page would), to
@@ -816,8 +826,9 @@ like any other, `chrome-extension://<id>` (A11).
   the extension's own origin and opened by the service worker only. The extension's
   scripts in a page run in that page's origin and cannot open that database, so a page
   whose renderer is compromised can neither read the secret (and take the extension's place
-  from anywhere, A4) nor allow its own tools. The extension asks for no `storage`
-  permission, so there is no `chrome.storage` area those scripts could read or write.
+  from anywhere, A4) nor allow its own tools. The extension's `storage` permission is
+  for `storage.session` alone (the pinned tab's id for one browser session, DEC-230),
+  which those scripts cannot reach; it reads nothing from the areas they could write.
 - **Filling in its code on the relay's page** (DEC-203). When an AI app opens the
   relay's `/authorize` page in the same browser, the extension can write its own code
   into the form and submit it, after its user's Allow. One click is less than opening

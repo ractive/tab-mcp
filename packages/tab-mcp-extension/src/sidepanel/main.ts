@@ -53,6 +53,7 @@ import {
 	updateCountdowns,
 } from "./question.ts";
 import { copyText, SELECTED, setupSteps } from "./setup.ts";
+import { targetLine, workHereFor } from "./target.ts";
 
 /** How long the panel must be visible and focused before Allow counts. */
 const ALLOW_DELAY_MS = 750;
@@ -559,13 +560,18 @@ function arm(): void {
 		"input.always-allow, #allow-tools",
 	))
 		setAvailable(control, now >= movedUntil);
+	setAvailable($("work-here"), now >= Math.max(movedUntil, workHereUntil));
 	// The quiet after the dialog, for the end-to-end tests: no look.
 	document.body.toggleAttribute("data-quiet", now < quietUntil);
 }
 
 setInterval(() => {
 	const now = Date.now();
-	if (cards.size > 0 || now < Math.max(movedUntil, quietUntil) + 200) arm();
+	if (
+		cards.size > 0 ||
+		now < Math.max(movedUntil, quietUntil, workHereUntil) + 200
+	)
+		arm();
 }, 100);
 for (const type of ["focus", "blur", "visibilitychange"])
 	window.addEventListener(type, arm);
@@ -743,6 +749,35 @@ function showTab(s: PanelState): void {
 			?.focus();
 }
 
+// --- Where AI apps work (DEC-230) ---
+
+/**
+ * Until when "Work here" takes no click: after the tab it pins changed (the
+ * user switched tabs), the target changed, or the button moved (the card
+ * above it changed), a click meant for what was there must not pin this
+ * tab (ES 5). Shown: it waits in the disabled look.
+ */
+let workHereUntil = 0;
+/** What "Work here" was last shown for: the tab, the target, where it sat. */
+let workHereAt = "";
+
+function showTarget(s: PanelState): void {
+	setText($("target-line"), targetLine(s.target));
+	const mode = $<HTMLSelectElement>("target-mode");
+	const wanted = s.target?.mode ?? "front";
+	if (mode.value !== wanted) mode.value = wanted;
+	const button = $("work-here");
+	const shown = workHereFor(s.tab, s.target);
+	button.hidden = !shown;
+	$("work-here-note").hidden = !shown;
+	const at = JSON.stringify([shown, s.tab?.tabId, s.target, button.offsetTop]);
+	if (at !== workHereAt) {
+		workHereAt = at;
+		if (shown) workHereUntil = Date.now() + ALLOW_DELAY_MS;
+	}
+	setAvailable(button, Date.now() >= Math.max(movedUntil, workHereUntil));
+}
+
 /** The "Fill in the code for me" switch under "Connect your AI app" (DEC-203, DEC-210). */
 const fill = fillPanel(
 	{
@@ -775,6 +810,7 @@ function show(s: PanelState): void {
 	fill.show(s);
 	showQuestions(s.questions, s.expired);
 	showTab(s);
+	showTarget(s);
 }
 
 // --- Controls ---
@@ -904,6 +940,19 @@ $("allow-tools").addEventListener("click", (event) => {
 		names: view.names,
 		on: view.on,
 	});
+});
+
+$("work-here").addEventListener("click", () => {
+	const tabId = state?.tab?.tabId;
+	// During the wait after it moved, or the tab changed, the click does nothing.
+	if (isUnavailable($("work-here")) || quiet() || tabId === undefined) return;
+	send({ type: "work-here", tabId });
+});
+
+$("target-mode").addEventListener("change", () => {
+	const mode = $<HTMLSelectElement>("target-mode").value;
+	if (mode === "front" || mode === "pinned")
+		send({ type: "set-target-mode", mode });
 });
 
 $("allow-all").addEventListener("click", () => {

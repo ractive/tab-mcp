@@ -110,6 +110,27 @@ describe.skipIf(!firefoxOk)("the Firefox build (the test build)", () => {
 			},
 		);
 		await step(
+			"list_tabs names the page's tab, in front, not the panel's; page_info reaches it by its id (DEC-230)",
+			async () => {
+				const listed = (await call(stack, "list_tabs")).structuredContent as {
+					mode: string;
+					tabs: { tab: string; url: string; inFront?: true }[];
+				};
+				expect(listed.mode).toBe("the tab in front");
+				const page = listed.tabs.find(
+					(t) => t.url === `${stack.site}/webmcp.html`,
+				);
+				expect(page?.inFront).toBe(true);
+				expect(
+					listed.tabs.some((t) => t.url.startsWith("moz-extension:")),
+				).toBe(false);
+				const result = await call(stack, "page_info", { tab: page?.tab });
+				expect(result.structuredContent).toMatchObject({
+					url: `${stack.site}/webmcp.html`,
+				});
+			},
+		);
+		await step(
 			"a read-only tool runs at once, with the page's answer",
 			async () => {
 				const result = await call(stack, "page_get_greeting", { name: "Ada" });

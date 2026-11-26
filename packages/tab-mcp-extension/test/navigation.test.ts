@@ -447,6 +447,8 @@ function fakeChrome(
 	const chrome: NavigationChrome & { steps: Step[]; tab_: FakeTab } = {
 		steps,
 		tab_: tab,
+		// The tab calls go to, as `current` answers when the call starts.
+		target: (named) => chrome.current(named),
 		current: async () => target(),
 		tab: async () => target(),
 		page: async (t): Promise<PageInfo> => {
@@ -774,7 +776,7 @@ describe("the navigation tools", () => {
 				{ url: "https://other.test/" },
 				execOptions(),
 			) as Promise<unknown>,
-		).rejects.toThrow("The tab in front changed meanwhile");
+		).rejects.toThrow("The tab AI apps work in changed meanwhile");
 		expect(chrome.steps).toEqual([]);
 		// No tab in front at all counts the same.
 		chrome.current = inFront;
@@ -793,7 +795,7 @@ describe("the navigation tools", () => {
 				{ url: "https://other.test/" },
 				execOptions(),
 			) as Promise<unknown>,
-		).rejects.toThrow("The tab in front changed meanwhile");
+		).rejects.toThrow("The tab AI apps work in changed meanwhile");
 		expect(chrome.steps).toEqual([]);
 	});
 
@@ -828,7 +830,7 @@ describe("the navigation tools", () => {
 		).toEqual({
 			readable: false,
 			reason:
-				"The tab was navigated, but another tab is in front now; page_info says which page that is.",
+				"The tab was navigated, but AI apps work in another tab now; page_info says which page that is.",
 		});
 		expect(chrome.steps).toEqual([{ url: `${SHOP}/sale` }]);
 	});

@@ -283,7 +283,9 @@ On failure the log shows AMO's answer.
 > Click the extension's icon on a tab to let it read that tab, then turn on AI access in
 > the side panel. Under "Connect your AI app" it shows an address to add to your AI app
 > and a code to type when your AI app asks for it. The AI app then sees the page's tools,
-> follows the tab in front and can call them.
+> follows the tab in front (or works in a tab you pin) and can call them. It can list
+> the tabs the extension may read, with their titles and addresses, and work in one of
+> them.
 >
 > A tool the page marks read-only runs at once. Every other tool asks you first, in the
 > side panel or in a notification, with the AI app's name, the site and the arguments.
@@ -339,6 +341,7 @@ registered, and opening pages in that tab.
 | `sidePanel` | The side panel shows the connection's state, the pairing address and code, the tab's tools and the questions before a tool runs or the tab goes to another site. |
 | `notifications` | Ask the user before a tool that is not read-only runs, or the tab goes to another site, while the side panel is not in front ("Allow once"; closing it declines). |
 | `alarms` | Wake the service worker once a minute while AI access is on, so a connection lost while the computer slept comes back. |
+| `storage` | `storage.session` only: the id of the tab the user (or the AI app, with the user's setting) pinned as the one AI apps work in, for the current browser session. Nothing is stored in `storage.local` or `storage.sync`; every other setting is in the extension's IndexedDB. |
 | `http://*/*`, `https://*/*` (optional) | Asked for only when the user clicks "Give access to all sites": read every http(s) tab's WebMCP tools without a click on the icon. Or only the relay's site, when the user turns on the "Fill in the code for me" switch (off by default): on the relay's pairing page, read the AI app's name and host and the request's id from the form and, after the user allows it (or, for an AI app's host the user chose "Always allow" for, with a notification instead of a question), fill in the extension's pairing code and submit the form. |
 
 **Remote code:** No. All code is in the package. The extension lists and calls only the
@@ -352,7 +355,10 @@ sends.
   - **Web history:** the address (with its query and fragment) and title of the tab in
     front, when the AI app asks for them (`page_info`) and after it opened a page in the
     tab (`navigate`, `go_back`, `go_forward`, `reload`) or a page tool took the tab to
-    another page. For back and forward the extension checks, in the page, whether the page
+    another page; the same of a pinned tab or of a tab the AI app names, if the extension
+    may read it; and, when the AI app lists the tabs (`list_tabs`), the address and title
+    of every tab the extension may read, of the others only how many there are
+    (DEC-230). For back and forward the extension checks, in the page, whether the page
     before or after is on the same origin; that stays in the browser.
   - **Website content:** the page's WebMCP tools (names, descriptions, schemas), and the
     arguments and results of the calls the AI app makes and the user allows.
@@ -360,7 +366,8 @@ sends.
   information, personal communications, location, user activity (clicks, keystrokes).
 - Stored locally only (IndexedDB): the relay address, whether AI access is on, a random
   secret per relay that identifies this installation to it, the connected AI apps as the
-  relay last listed them (grant id, name, verified host), the tools allowed per site, and
+  relay last listed them (grant id, name, verified host), the tools allowed per site,
+  where AI apps work (the tab in front, or a pinned tab and its id), and
   with "Fill in the code for me" on its relay and the hosts chosen for "Always allow"
   (PRIVACY.md has the full list). Transmitted only to the
   relay the user chose (by default tab-mcp.ractive.ch, run by the developer) and the AI

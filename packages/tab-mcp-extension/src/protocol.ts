@@ -82,7 +82,22 @@ export type PanelCommand =
 	 */
 	| { type: "set-fill"; on: boolean; id: string }
 	/** Remove an AI app's host from "Filled in without asking for:" (DEC-213). */
-	| { type: "forget-fill-host"; host: string };
+	| { type: "forget-fill-host"; host: string }
+	/** "AI apps work in": the tab in front, or a pinned tab (DEC-230). */
+	| { type: "set-target-mode"; mode: "front" | "pinned" }
+	/** "Work here": pin tab `tabId`, the tab the panel shows (DEC-230). */
+	| { type: "work-here"; tabId: number };
+
+/** Where AI apps' calls go, as the panel shows it (DEC-230). */
+export interface TargetView {
+	mode: "front" | "pinned";
+	/**
+	 * Mode "pinned" once a tab is pinned: its id, and its title ("" where
+	 * the extension may not read it now); `closed`: it was closed, and calls
+	 * fail until another is pinned.
+	 */
+	pinned?: { tabId: number; title: string; closed?: true };
+}
 
 /** A connected AI app. */
 export interface GrantView {
@@ -109,6 +124,13 @@ export interface QuestionView {
 	 * go to, or what is known of it (back or forward).
 	 */
 	navigation?: { to: string };
+	/**
+	 * The call is for a tab that is not the tab in front (the pinned one, or
+	 * one its `tab` argument named, DEC-230): that tab's title (the page's
+	 * text, "" if none), and whether it is the pinned tab. The card says so,
+	 * so that two tabs of one site are not taken for each other.
+	 */
+	inTab?: { title: string; pinned: boolean };
 	/**
 	 * Not a tool: whether to fill in the extension's code on the relay's
 	 * pairing page for this AI app (DEC-203). `name` is its own name for
@@ -208,6 +230,8 @@ export interface PanelState {
 	/** The last fill without a question, while it is recent: what the panel says. */
 	fillNotice?: { text: string; at: number };
 	tab?: TabView;
+	/** Where AI apps' calls go (DEC-230). */
+	target?: TargetView;
 	/**
 	 * Without their arguments, which can be large: each question's come once
 	 * per panel, in a `question-args` message before the first state that
@@ -437,6 +461,14 @@ export function parseCommand(message: unknown): PanelCommand | undefined {
 		case "forget-fill-host":
 			return isString(m["host"])
 				? { type: "forget-fill-host", host: m["host"] }
+				: undefined;
+		case "set-target-mode":
+			return m["mode"] === "front" || m["mode"] === "pinned"
+				? { type: "set-target-mode", mode: m["mode"] }
+				: undefined;
+		case "work-here":
+			return Number.isSafeInteger(m["tabId"])
+				? { type: "work-here", tabId: m["tabId"] as number }
 				: undefined;
 		default:
 			return undefined;

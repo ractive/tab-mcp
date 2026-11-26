@@ -41,6 +41,10 @@ interface Fake {
 	notificationOptions: Record<string, unknown>[];
 	/** The page tools the content script was asked to run, by name. */
 	pageCalls: string[];
+	/** `chrome.storage.session`: the pinned tab (DEC-230). */
+	session: Map<string, unknown>;
+	/** How often the page's tools were read (`webmcp-list`). */
+	lists?: number;
 	/** More tabs than the one of `SITE` (`tabs.query` lists them after it). */
 	moreTabs?: { id: number; url?: string; active: boolean; windowId: number }[];
 	/** The `extension-state` messages sent, by tab id. */
@@ -88,7 +92,11 @@ function fakeChrome(fake: Fake) {
 		},
 		windows: {
 			getLastFocused: async () => ({ id: 1, focused: fake.focused }),
-			get: async (id: number) => ({ id, focused: fake.focused }),
+			get: async (id: number) => ({
+				id,
+				focused: fake.focused,
+				type: "normal",
+			}),
 		},
 		tabs: {
 			query: async () => [tab, ...(fake.moreTabs ?? [])],
@@ -114,6 +122,7 @@ function fakeChrome(fake: Fake) {
 					fake.vouches?.push({ vouch: request.vouch, state: request.state });
 					return { ok: true, value: "done" };
 				}
+				if (request.type === "webmcp-list") fake.lists = (fake.lists ?? 0) + 1;
 				if (request.type === "webmcp-list")
 					return {
 						ok: true,
@@ -138,6 +147,17 @@ function fakeChrome(fake: Fake) {
 			},
 		},
 		permissions: { contains: async () => true },
+		storage: {
+			session: {
+				get: async (key: string) =>
+					fake.session.has(key) ? { [key]: fake.session.get(key) } : {},
+				set: async (items: Record<string, unknown>) => {
+					for (const [key, value] of Object.entries(items))
+						fake.session.set(key, value);
+				},
+				remove: async (key: string) => void fake.session.delete(key),
+			},
+		},
 		// A function's injection (the probe for Chrome's id of the page that
 		// was read) finds the content script of "doc-1" in "chrome-doc-1".
 		scripting: {
@@ -339,6 +359,7 @@ async function connection(
 		notifications: [],
 		notificationOptions: [],
 		pageCalls: [],
+		session: new Map(),
 	};
 	g.chrome = fakeChrome(fake);
 	// Stored, as start() loads them.
@@ -611,6 +632,116 @@ describe("the panel's commands", () => {
 	});
 });
 
+describe("where AI apps work, in the worker (DEC-230)", () => {
+	test("the panel's state says it; Work here pins the tab the panel shows, only that one; the setting back to the tab in front drops the pin", async () => {
+		const { c, kv, fake } = await connection({
+			tools: [pageTool("look", true)],
+		});
+		const panel = fakePanel();
+		const receive = c.addPanel(panel.port);
+		await until(() => panel.state()?.tab?.tabId === 1, "the tab shown");
+		expect(panel.state()?.target).toEqual({ mode: "front" });
+		// A tab the panel no longer shows: nothing is pinned.
+		receive({ type: "work-here", tabId: 7 });
+		await Bun.sleep(20);
+		expect(kv.data.get("aiTarget")).toBeUndefined();
+		receive({ type: "work-here", tabId: 1 });
+		await until(
+			() => panel.state()?.target?.pinned !== undefined,
+			"the pin shown",
+		);
+		expect(kv.data.get("aiTarget")).toEqual({ mode: "pinned" });
+		expect(fake.session.get("pinnedTab")).toBe(1);
+		expect(panel.state()?.target).toEqual({
+			mode: "pinned",
+			pinned: { tabId: 1, title: "Shop" },
+		});
+		receive({ type: "set-target-mode", mode: "front" });
+		await until(
+			() => panel.state()?.target?.mode === "front",
+			"the tab in front shown",
+		);
+		expect(kv.data.get("aiTarget")).toEqual({ mode: "front" });
+		receive({ type: "set-target-mode", mode: "pinned" });
+		await until(() => panel.state()?.target?.mode === "pinned", "pinned");
+		expect(panel.state()?.target).toEqual({ mode: "pinned" });
+	});
+
+	test("with a tab pinned, a tab switch or a window's focus does not read the pinned tab's tools again; its own load does (DEC-177)", async () => {
+		const { c, fake } = await connection({ tools: [pageTool("look", true)] });
+		const panel = fakePanel();
+		c.addPanel(panel.port);
+		await until(() => panel.state()?.tab?.tabId === 1, "the tab shown");
+		// The tab in front: a switch reads the tools of the new one.
+		await Bun.sleep(20);
+		let before = fake.lists ?? 0;
+		c.frontChanged();
+		await until(() => (fake.lists ?? 0) > before, "read after a switch");
+		await callTool("use_tab", { tab: "1" });
+		await Bun.sleep(20);
+		before = fake.lists ?? 0;
+		c.frontChanged();
+		c.pageChanged(5, true);
+		await Bun.sleep(30);
+		expect(fake.lists ?? 0).toBe(before);
+		// The pinned tab's own load or toolchange reads it again.
+		c.pageChanged(1, false);
+		await until(() => (fake.lists ?? 0) > before, "read after its load");
+	});
+
+	test("a question for a tab that is not in front says which one, pinned or not", async () => {
+		const { c, fake } = await connection({
+			tools: [pageTool("place_order", false)],
+		});
+		fake.moreTabs = [{ id: 2, url: `${SITE}/`, active: false, windowId: 1 }];
+		const panel = fakePanel();
+		const receive = c.addPanel(panel.port);
+		const running = callTool("webmcp_call", {
+			name: "place_order",
+			tab: "2",
+		});
+		await until(() => panel.state()?.questions.length === 1, "the question");
+		const [question] = panel.state()?.questions ?? [];
+		expect(question?.inTab).toEqual({ title: "Shop", pinned: false });
+		receive({ type: "answer", id: question?.id ?? "", answer: "deny" });
+		await expect(running).rejects.toThrow("did not allow");
+		// The tab in front: no such line.
+		const front = callTool("webmcp_call", { name: "place_order" });
+		await until(() => panel.state()?.questions.length === 1, "the question");
+		const [again] = panel.state()?.questions ?? [];
+		expect(again?.inTab).toBeUndefined();
+		receive({ type: "answer", id: again?.id ?? "", answer: "deny" });
+		await expect(front).rejects.toThrow("did not allow");
+		expect(fake.pageCalls).toEqual([]);
+	});
+
+	test("list_tabs: the tab it may read, the others counted; use_tab pins it", async () => {
+		const { fake, kv } = await connection({ tools: [pageTool("look", true)] });
+		// A tab whose address Chrome hides (no access), and the panel's own page.
+		fake.moreTabs = [
+			{ id: 2, active: false, windowId: 1 },
+			{
+				id: 3,
+				url: `chrome-extension://${ID}/sidepanel/index.html`,
+				active: true,
+				windowId: 1,
+			},
+		];
+		expect(await callTool("list_tabs")).toMatchObject({
+			mode: "the tab in front",
+			tabs: [{ tab: "1", title: "Shop", url: `${SITE}/`, inFront: true }],
+			notReadable: 1,
+		});
+		expect(await callTool("use_tab", { tab: "1" })).toMatchObject({
+			tab: "1",
+			pinned: true,
+			title: "Shop",
+		});
+		expect(kv.data.get("aiTarget")).toEqual({ mode: "pinned" });
+		expect(fake.session.get("pinnedTab")).toBe(1);
+	});
+});
+
 test("the extension's own library mirrors nothing into WebMCP, even with a document that has it (webmcp: false, DEC-222)", async () => {
 	const w = globalThis as { Document?: unknown; document?: unknown };
 	const saved = { Document: w.Document, document: w.document };
@@ -643,7 +774,7 @@ describe("the state for pages with the client library (DEC-207, DEC-221)", () =>
 			name: "tab-mcp browser extension",
 			on: false,
 			apps: [],
-			whileInFront: true,
+			whileInFront: false,
 		});
 	});
 
@@ -662,7 +793,7 @@ describe("the state for pages with the client library (DEC-207, DEC-221)", () =>
 			name: "tab-mcp browser extension",
 			on: false,
 			apps: [],
-			whileInFront: true,
+			whileInFront: false,
 		};
 		expect(fake.states).toEqual([
 			[1, off],

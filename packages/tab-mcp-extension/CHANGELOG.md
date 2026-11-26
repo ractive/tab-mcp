@@ -12,6 +12,37 @@ Edge Add-ons and addons.mozilla.org. Each release attaches its store package,
 from 0.3.3 also the Firefox package `tab-mcp-browser-extension-firefox-<version>-store.zip`
 and the source archive `tab-mcp-<version>-source.zip` it builds from.
 
+## Unreleased
+
+### Added
+
+- **Where AI apps work** (DEC-230). A setting under Settings, "AI apps work in": the
+  tab in front (the default, as before) or a pinned tab. Pinned, the first call pins the
+  tab in front if the extension may read it, and later calls go there wherever you are;
+  switching tabs moves nothing (and reads the pinned tab's tools no more). A pinned tab
+  that was closed makes calls fail with that reason, never go elsewhere. The card of the
+  tab in front ends with a line that says where calls go ("AI apps work in: Shop
+  (pinned)") and "Work here", which pins that tab (it waits 750 ms after it came or
+  moved, as the switches that allow something do). A question for a tab that is not in
+  front says "In another tab" with its title. The pin lasts one browser session.
+- **The `storage` permission**, for `storage.session` alone: the pinned tab's id, which
+  the browser empties with every browser session. Nothing is kept in `storage.local` or
+  `sync`; the settings stay in IndexedDB.
+- **`list_tabs` and `use_tab`.** `list_tabs` names the tabs the extension may read, with
+  their ids, titles and addresses, which one is in front and which one is pinned, and
+  only counts the others. `use_tab` pins one of them (and, in mode "the tab in front",
+  switches the setting to a pinned tab); a tab the extension may not read is refused.
+- **The `tab` argument** on `page_info`, `webmcp_tools`, `webmcp_call`, `navigate`,
+  `go_back`, `go_forward` and `reload`: an id from `list_tabs`; the call goes to that
+  tab and the pin stays. The `page_<name>` tools follow the tab AI apps work in.
+
+### Changed
+
+- A page with the tab-mcp client library is told `whileInFront: false`, so it no longer
+  says "while this tab is in front".
+- A page tool's call the AI app cancelled before it reached the page is not sent to the
+  page at all.
+
 ## [0.4.0][extension-0.4.0] - 2026-11-24
 
 ### Added
