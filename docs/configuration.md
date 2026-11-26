@@ -70,6 +70,10 @@ than 0.
 | `TAB_MCP_OIDC_SUBJECT_CLAIM` | `sub` | The ID token claim compared with the page's user: `sub`, or `oid` for Microsoft Entra ID (whose `sub` differs per application). |
 | `TAB_MCP_TAB_ASSERTION_ISSUER` | none | The `iss` of the tab assertions your web app's backend signs. Required for `oidc`. |
 | `TAB_MCP_TAB_ASSERTION_JWKS_URL` | none | The URL of the public keys (JWKS) that sign those assertions. Required for `oidc`. |
+| `TAB_MCP_SIGN_IN_APPS` | empty: no browser signs in | Comma-separated app ids whose pages may sign in at the relay (see [Browser sign-in](#browser-sign-in)), e.g. `tab-mcp-extension,tab-mcp-extension-firefox`. Needs at least one provider below. |
+| `TAB_MCP_SIGN_IN_GOOGLE_CLIENT_ID`, `TAB_MCP_SIGN_IN_GOOGLE_CLIENT_SECRET` | none | The relay's client at Google (a web application) and its secret: both or neither. |
+| `TAB_MCP_SIGN_IN_MICROSOFT_CLIENT_ID`, `TAB_MCP_SIGN_IN_MICROSOFT_CLIENT_SECRET` | none | The relay's app registration at Microsoft (multi-tenant, personal and work accounts) and its client secret: both or neither. |
+| `TAB_MCP_SIGN_IN_GITHUB_CLIENT_ID`, `TAB_MCP_SIGN_IN_GITHUB_CLIENT_SECRET` | none | The relay's OAuth App at GitHub and its client secret: both or neither. |
 
 Settings that run a timer (`TAB_MCP_REQUEST_TIMEOUT_S`, `TAB_MCP_KEEPALIVE_S`,
 `TAB_MCP_SESSION_LIFETIME_S`, `TAB_MCP_HEARTBEAT_S`, `TAB_MCP_BODY_TIMEOUT_S`, and the same
@@ -269,6 +273,58 @@ minutes are fixed, not a setting. Grants made this way remember (a hash of) the 
 they work only while the page they were made for is open and signed in as that person,
 and a page that signs in as someone else ends them.
 See the [threat model](threat-model.md) for what this does and does not protect.
+
+## Browser sign-in
+
+The tab-mcp browser extension can sign in at the relay with Google, Microsoft or GitHub
+(DEC-231). Every browser signed in with one account is a member of that account's group:
+the members see each other in their panels, and any member can rename or remove any
+other. This is separate from identity binding above, which pairs AI apps with a web
+app's signed-in user; both can be set on one relay, and they share the callback.
+
+```sh
+TAB_MCP_SIGN_IN_APPS=tab-mcp-extension,tab-mcp-extension-firefox
+TAB_MCP_SIGN_IN_GOOGLE_CLIENT_ID=…apps.googleusercontent.com
+TAB_MCP_SIGN_IN_GOOGLE_CLIENT_SECRET=…        # from your secret store
+TAB_MCP_SIGN_IN_MICROSOFT_CLIENT_ID=aae32a2a-bef7-4fdb-9422-9d5df62b78e5
+TAB_MCP_SIGN_IN_MICROSOFT_CLIENT_SECRET=…
+TAB_MCP_SIGN_IN_GITHUB_CLIENT_ID=Ov23litK0ROOKaHzH01W
+TAB_MCP_SIGN_IN_GITHUB_CLIENT_SECRET=…
+```
+
+(The two client ids are the hosted relay's; yours are your own.)
+
+- **Which pages may sign in.** Only sessions of the apps in `TAB_MCP_SIGN_IN_APPS`, and
+  only from a browser extension's page, which the relay recognises by its origin and
+  its redirect URL (`https://<id>.chromiumapp.org/`, `https://<hash>.extensions.allizom.org/`).
+  A session must also ask for it in its `hello` ([protocol](protocol.md#browser-sign-in));
+  older extensions do not, and get exactly what they got before. Reserve the Chrome
+  extension's app for its origins with `TAB_MCP_SITES` (`apps`), as for any app. A
+  Firefox extension's app cannot be reserved (any Firefox extension may name it), so
+  any Firefox extension that a user signs in with joins that user's group.
+- **Providers.** Register the relay at each provider you offer, with the redirect URI
+  `<TAB_MCP_PUBLIC_URL>/authorize/callback`, the one callback of every sign-in:
+  - Google: a web application (OAuth client) with the scopes `openid` and `email`. Its
+    consent screen must be published ("In production"), or only its test users can sign
+    in. A relay that also uses Google for identity binding can use the same client.
+  - Microsoft: an app registration for "accounts in any organizational directory and
+    personal Microsoft accounts" (the relay uses the `common` endpoint, so no tenant is
+    configured), with a client secret and the scopes `openid` and `profile`. Work
+    accounts can sign in only where their organisation lets its users consent to the
+    app: by default that needs a verified publisher, otherwise an administrator consents
+    once for the organisation. Client secrets expire (at most 24 months): renew yours
+    in time.
+  - GitHub: an OAuth App without scopes (the relay reads only the public profile's user
+    id).
+  A provider is offered when both its client id and its secret are set. The secrets are
+  never logged.
+- **What the relay keeps.** A hash of the provider and the account's stable id (Google
+  `sub`, Microsoft `tid` and `oid`, GitHub's numeric user id), the browser's label and
+  when it signed in, in the token store (the SQLite store's `bindings` table, schema 7;
+  a store of your own needs the binding methods, see [token store](token-store.md), or the
+  relay refuses to start). Not the e-mail address or the user name: the extension is
+  told them once and keeps them itself. A sign-in lasts 90 days, then the browser signs
+  in again. A group has at most 16 browsers.
 
 ## Open relay
 

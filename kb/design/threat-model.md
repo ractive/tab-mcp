@@ -561,6 +561,34 @@ single page: whoever holds a person's unused assertion can bind a session of the
 that person (DEC-196). The threats and mitigations are in `docs/threat-model.md` (A12)
 and DEC-076 to DEC-079.
 
+### A16: Signed-in browsers and their groups (iteration 53)
+
+The extension can sign in at the relay with Google, Microsoft or GitHub; the relay binds
+its address id to a hash of the account, and every browser of one account is a member of
+that account's group (DEC-229, DEC-231). The relay is the only OAuth client: one callback,
+the flow told apart by its `browser.<provider>.` state, PKCE S256, `nonce` for OpenID
+Connect, Microsoft's issuer checked against the token's own `tid`, GitHub's access token
+used once for `GET /user` and dropped. Only a session that names `signin.v1` in `hello`,
+of an app in `TAB_MCP_SIGN_IN_APPS`, from an extension origin whose redirect URL fits,
+gets any of it.
+
+- An account taken over at the provider puts a browser of its own into the group; once
+  AI apps connect to groups (PR 3), it can receive their calls. Every member sees it and
+  can remove it.
+- The relay's sign-in URL is single use, 10 minutes, cookie-bound to the browser that
+  opened it, and bound to the session that asked for it: a user who opens someone else's
+  link and finishes the sign-in puts that person's browser into their own group (and
+  that session learns the user's display name). Mitigated by the provider's account
+  chooser, the announcement to every member and removal; no confirmation page at the
+  relay (open, DEC-231).
+- A member sees labels, member ids, sign-in times and who is online, never address ids,
+  tabs or display names; any member can rename or remove any other.
+- The store keeps an unkeyed SHA-256 of prefix, provider and stable id (the relay has no
+  secret to key it with): a copy of the store reveals which public GitHub accounts
+  signed in. No e-mail address or name is stored or logged.
+- Sign-in lasts 90 days; limits per session, per network, flows in all, page views per
+  network, 16 members per group. The full analysis is A16 in `docs/threat-model.md`.
+
 ### A14: WebMCP callers of mirrored tools (iteration 25)
 
 Unless a page sets `webmcp: false`, the library also registers the page's tools with
@@ -704,6 +732,9 @@ is A15 in `docs/threat-model.md` (DEC-122 to DEC-126, DEC-164 to DEC-167).
   page wrote them (cut, prefixed, marked); a read-only claim is the page's (A13).
 - The known Claude header bug tolerance (decision log) slightly widens what the relay
   accepts; it is limited to one exact version pair.
+- Browser sign-in (A16): a taken-over provider account, or a user who finishes the
+  sign-in of someone else's link, adds a browser to the group; members can rename and
+  remove each other; a store copy reveals which public GitHub accounts signed in.
 
 # Citations
 

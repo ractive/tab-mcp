@@ -6,8 +6,8 @@ browser library `@ractive-ch/tab-mcp-client` implements the tab side; the relay
 implementation or want to know what passes over the connection.
 
 The protocol tunnels the AI app's MCP HTTP requests to the tab and the tab's HTTP
-responses back. It also carries the session's control messages: pairing, connected apps
-and the heartbeat. It knows nothing about MCP tools. The tab runs the MCP server itself
+responses back. It also carries the session's control messages: pairing, connected apps,
+the heartbeat and, for a browser extension that asks for it, its sign-in. It knows nothing about MCP tools. The tab runs the MCP server itself
 (MCP revision 2026-07-28, stateless); the relay authenticates AI apps and forwards their
 requests.
 
@@ -46,8 +46,8 @@ T→R is tab to relay, R→T is relay to tab.
 
 | Type | Dir | Fields | Meaning |
 |---|---|---|---|
-| `hello` | T→R | `library: {name, version}`, `app: {id, name?}`, `secret`, `revokeAll?` | First message after the open. `app.id` names the app whose address the page serves, `https://<relay>/s/<app.id>/mcp` (see [the app id](#session)): 1 to 32 characters of `a-z`, `0-9` and `-`, not starting or ending with `-`. A `hello` without it (libraries before 0.17 send none) gets `bad_message` and close 1008. If the relay's configuration does not let the page's origin serve that app ([`sites[].apps`](configuration.md#sites)), the relay answers `error` `app_not_allowed` and closes with 1008; no session opens, and no open session is replaced. The relay ignores a `page` field, which libraries before 0.17 sent. `app.name` (for example `saturnus`) must be 1-64 characters without control characters, else `bad_message` and close 1008. It is the page's own claim, a name for people; the relay uses it in its ["the page is not open"](#when-the-page-is-not-open) answers unless the relay configures a name for the site. The relay removes bidi, zero-width and other invisible characters from it, and ignores a name that is empty then or names a domain other than the page origin's host (`session` then has no `appName`). Any dotted word that ends in two or more letters counts as a domain, as in AI apps' names (DEC-092): "Node.js tools" on `https://example.com` is ignored; a page that wants such a name configures it as the site's `name`. `revokeAll: true` takes the page's address id back after a takeover (DEC-095): the relay claims the address id for this session and revokes every grant of it before it lists the grants for `session`, whatever session claims it next, and `session` then lists none, which confirms it. A store error ends the session with 1008 instead. Anything but a boolean is `bad_message`. Only a holder of the secret can send it, and it could send `grants.revokeAll` anyway. Relays 0.4 and older ignore the field and list the grants: the library then closes the connection and `disconnectAll()` rejects (DEC-136). |
-| `session` | R→T | `sessionId`, `address`, `origin`, `appName?`, `pairing`, `expiresAt`, `limits`, `grants` | The session exists. `address` is the MCP URL the user gives to the AI app: the app's, `https://<relay>/s/<app.id>/mcp`, the same for every page of the app. `pairing` is `code` or `oidc` (identity binding). |
+| `hello` | T→R | `library: {name, version}`, `app: {id, name?}`, `secret`, `revokeAll?`, `capabilities?` | First message after the open. `app.id` names the app whose address the page serves, `https://<relay>/s/<app.id>/mcp` (see [the app id](#session)): 1 to 32 characters of `a-z`, `0-9` and `-`, not starting or ending with `-`. A `hello` without it (libraries before 0.17 send none) gets `bad_message` and close 1008. If the relay's configuration does not let the page's origin serve that app ([`sites[].apps`](configuration.md#sites)), the relay answers `error` `app_not_allowed` and closes with 1008; no session opens, and no open session is replaced. The relay ignores a `page` field, which libraries before 0.17 sent. `app.name` (for example `saturnus`) must be 1-64 characters without control characters, else `bad_message` and close 1008. It is the page's own claim, a name for people; the relay uses it in its ["the page is not open"](#when-the-page-is-not-open) answers unless the relay configures a name for the site. The relay removes bidi, zero-width and other invisible characters from it, and ignores a name that is empty then or names a domain other than the page origin's host (`session` then has no `appName`). Any dotted word that ends in two or more letters counts as a domain, as in AI apps' names (DEC-092): "Node.js tools" on `https://example.com` is ignored; a page that wants such a name configures it as the site's `name`. `revokeAll: true` takes the page's address id back after a takeover (DEC-095): the relay claims the address id for this session and revokes every grant of it before it lists the grants for `session`, whatever session claims it next, and `session` then lists none, which confirms it. A store error ends the session with 1008 instead. Anything but a boolean is `bad_message`. Only a holder of the secret can send it, and it could send `grants.revokeAll` anyway. Relays 0.4 and older ignore the field and list the grants: the library then closes the connection and `disconnectAll()` rejects (DEC-136). `capabilities` lists what the tab understands beyond the messages of this document's other sections: at most 16 names of 1 to 32 characters of `a-z`, `0-9`, `.` and `-`, starting with a letter or digit; anything else is `bad_message` and close 1008. The relay ignores names it does not know. The one name so far is `signin.v1` ([Browser sign-in](#browser-sign-in)). A tab that sends no list, or a list without a name, gets none of the messages that name brings, and the relay answers it as a relay without them would. A name stands for one form of its messages; an incompatible change gets a new name (`signin.v2`), and a tab may offer both during a transition. |
+| `session` | R→T | `sessionId`, `address`, `origin`, `appName?`, `pairing`, `expiresAt`, `limits`, `grants`, `signIn?` | The session exists. `address` is the MCP URL the user gives to the AI app: the app's, `https://<relay>/s/<app.id>/mcp`, the same for every page of the app. `pairing` is `code` or `oidc` (identity binding). `signIn` only for a tab that named `signin.v1` and whose app may sign in ([Browser sign-in](#browser-sign-in)). |
 | `ping` | R→T | `t` | Heartbeat, every `limits.heartbeatMs`. |
 | `pong` | T→R | `t` | Answer to `ping` with the same `t`. |
 | `bye` | both | `reason` | Orderly end; the sender closes the socket after it. Reasons from the relay: `replaced`, `expired`, `idle`, `shutdown`. |
@@ -156,6 +156,82 @@ in as someone other than the page's user.", and a page that is open but not sign
 for like a closed page (below), then answered with "The page is open, but nobody is
 signed in to it. …". When the page proves another person than before, the relay revokes
 the grants of the previous one and ends their requests in flight.
+
+### Browser sign-in
+
+From relay 0.14 on (DEC-231): a browser extension can sign in at the relay with an
+account at Google, Microsoft or GitHub. Every browser signed in with the same account is
+a member of that account's *group*. This section is the relay's side: it binds the
+session's address id to the account and keeps the group's members informed; what a
+group's members do together beyond that is not part of the protocol yet.
+
+Only a session whose `hello` named `signin.v1` in `capabilities`, and whose app the
+relay lets sign in (`TAB_MCP_SIGN_IN_APPS`, [configuration](configuration.md#browser-sign-in)),
+gets any message of this section, and only for it are `signin.*` and `member.*`
+messages. For every other session they are unknown types (`unknown_type` when they carry
+an `id`, else ignored), and its `session` has no `signIn`: it is answered byte for byte
+as by a relay without sign-in.
+
+| Type | Dir | Fields | Meaning |
+|---|---|---|---|
+| `session` | R→T | `signIn: {providers, member?}` | `providers`: the providers this relay offers, in the order to show them, each `{id, name}` (`google` "Google", `microsoft` "Microsoft", `github` "GitHub"). `member`: this browser's member id while it is signed in; a `group` message follows the `session`. Without `member` the browser is not signed in (or the relay could not read its sign-in, logged as `store.error`; it then counts as signed out until it connects again). |
+| `signin.start` | T→R | `provider`, `redirectUrl`, `label?` | Start a sign-in. `redirectUrl` is the extension's `identity.getRedirectURL()` without a path, and must be its own: `https://<extension id>.chromiumapp.org/` for a page of `chrome-extension://<extension id>` (Chrome, Edge), `https://<40 hex digits>.extensions.allizom.org/` for a page of `moz-extension://` (Firefox). `label` (1-64 characters, cleaned of invisible characters) names the browser in its group, e.g. "Chrome on macOS"; default "Browser". A new `signin.start` ends the session's open sign-in. Answered with `signin.url` or `signin.failed`. |
+| `signin.url` | R→T | `provider`, `url`, `expiresAt` | The URL to open with `identity.launchWebAuthFlow` (interactive): the relay's own, `https://<relay>/signin?flow=…`. It works once, until `expiresAt` (10 minutes). |
+| `signin.done` | R→T | `provider`, `displayName`, `member` | The browser is signed in. `displayName` is what to show as "Signed in as …": Google's `email`, Microsoft's `preferred_username`, GitHub's login. The relay does not keep it and sends it only here; the tab keeps it if it wants to show it later. `member` is this browser's member id. A `group` message follows. |
+| `signin.failed` | R→T | `provider?`, `reason`, `message` | The sign-in did not happen. `reason`: `not_offered` (no such provider here), `bad_redirect` (the redirect URL is not the extension's, or the page is no extension), `rate_limited`, `busy` (too many sign-ins open on the relay), `provider_unavailable` (its metadata cannot be fetched), `provider_error` (the provider sent the browser back without a code: cancelled, refused), `unchecked` (the code or the ID token did not check out), `browser` (the sign-in came back in another browser than the one that opened the URL), `group_full` (the account has 16 browsers), `store_unavailable`. `message` is a fixed text per reason. A binding the browser had stays. |
+| `signin.out` | T→R | none | Sign out: the binding ends. Answered with `signin.ended` `signed_out` (also when the browser was not signed in), or `error` `store_unavailable` with `for: "signin.out"`, the binding then kept. |
+| `signin.ended` | R→T | `reason` | The browser is no longer signed in: `signed_out` (its own `signin.out`), `removed` (another member removed it), `expired` (90 days after its sign-in). It may sign in again. |
+| `group` | R→T | `provider`, `self`, `expiresAt`, `maxMembers`, `members` | The group's state: to every online member when a member joins, leaves, is renamed, connects or goes offline, and to a member when it connects. `self` is this browser's member id, `expiresAt` when its sign-in ends unless it signs in again, `maxMembers` 16. `members`, oldest sign-in first, this browser included: `{id, label, online, signedInAt}`. A member id is random (`m_…`) and tells nothing about the address id. A tab ignores fields it does not know: later relays add some. |
+| `member.rename` | T→R | `member`, `label` | Rename a member of this browser's group, itself or another (1-64 characters, cleaned; nothing visible left is `bad_message`). Every member then gets `group`. |
+| `member.remove` | T→R | `member` | Remove a member of this browser's group: its binding ends and, if it is online, it gets `signin.ended` `removed`; every member left gets `group`. Removing itself is `signin.out`. |
+
+A `member.rename` or `member.remove` for a member that is not in this browser's group,
+or from a browser that is not signed in, gets `error` `unknown_id` with `for` and
+`member`; a store failure gets `store_unavailable` the same way. The relay handles a
+session's sign-in messages, and a sign-in that comes back for it, one after another in
+the order they came. They count against the control budget like every other message.
+
+**The flow.** The relay is the only OAuth client at the providers.
+
+1. The extension sends `signin.start`; the relay answers `signin.url`.
+2. The extension opens the URL with `identity.launchWebAuthFlow`. The relay sets a
+   cookie for this sign-in (`HttpOnly`, `SameSite=Lax`, at most 10 minutes) and sends
+   the browser to the provider: OpenID Connect for Google (scopes `openid email`) and
+   Microsoft (the multi-tenant `common` endpoint, scopes `openid profile`), OAuth 2.0
+   for GitHub (an OAuth App, no scope), always with PKCE S256 and a `state`, and with a
+   `nonce` for OpenID Connect. The `state` of a browser's sign-in starts with
+   `browser.` and names the provider; on the one callback
+   `https://<relay>/authorize/callback` the relay tells its sign-ins from identity
+   binding's by it.
+3. The provider sends the browser back. The relay checks the cookie (without it:
+   `browser`, and an error page instead of the redirect below), redeems the code and
+   checks the account: the ID token as for identity binding (signature, `iss`, `aud`,
+   `azp`, `exp`, `iat`, `nonce`; Microsoft's `iss` must be
+   `https://login.microsoftonline.com/{tid}/v2.0` with the token's own `tid`), or for
+   GitHub one `GET https://api.github.com/user` with the access token, which the relay
+   then drops.
+4. The relay binds the session's address id to the account, sends `signin.done` and
+   `group`, and sends the browser to `redirectUrl?signin=done` (or `signin=failed`),
+   which ends `launchWebAuthFlow`. Nothing secret is in that URL: the result reaches the
+   extension over its session.
+
+A sign-in belongs to the session that started it. If that session is gone when the
+provider sends the browser back, or another session of the same address replaced it,
+the relay redeems nothing, binds nothing and sends the browser to
+`redirectUrl?signin=failed`. The relay's URL and the callback each work once.
+
+**The account and the group.** The relay keeps a hash of the provider and the account's
+stable id, never the id itself, the e-mail address or the name: Google `iss` and `sub`,
+Microsoft `tid` and `oid` (personal accounts have the tenant
+`9188040d-6c67-4c5b-b112-36a304b66dad`), GitHub the numeric user id (the login can
+change). Accounts are not linked across providers: one person's Google and GitHub
+accounts are two groups. A group has at most 16 members. A browser that signs in again
+with the same account keeps its member id and label, and its 90 days start again; with
+another account it leaves its group for that account's. A binding outlasts reconnects
+and restarts of the browser (its address secret stays) and ends 90 days after the
+sign-in: the relay then sends `signin.ended` `expired`, at the latest one sweep (10
+minutes) later. A signed-in browser's session is not closed early as unpaired
+(`TAB_MCP_UNPAIRED_IDLE_TIMEOUT_S`).
 
 ### Tunnelled MCP requests
 
@@ -371,11 +447,14 @@ read.
 
 An `unknown_id` or `store_unavailable` that answers a `grant.revoke`, `grants.revokeAll`
 or `identity.logout` names that message in `for` (relays from the third 0.10 release on), and the
-grant of a `grant.revoke` in `grantId`:
+grant of a `grant.revoke` in `grantId`. One that answers a `signin.out`, `member.rename`
+or `member.remove` ([Browser sign-in](#browser-sign-in)) names it in `for` too, and the
+member of the last two in `member`:
 
 ```json
 {"type":"error","code":"store_unavailable","message":"the relay cannot change grants right now; try again shortly","for":"grant.revoke","grantId":"g_…"}
 {"type":"error","code":"store_unavailable","message":"…","for":"identity.logout"}
+{"type":"error","code":"unknown_id","message":"no such member in this group","for":"member.remove","member":"m_…"}
 ```
 
 A page with several of these pending settles only the one named. Without `for` (old
@@ -385,13 +464,13 @@ first 0.16 release and older, which ignore them).
 
 | Code | Sent by | Meaning |
 |---|---|---|
-| `bad_message` | relay | Not JSON, missing fields, a binary frame, a malformed `secret`, a missing or malformed `app.id`. The library sends none to the relay: it drops a message it cannot read. |
+| `bad_message` | relay | Not JSON, missing fields, a binary frame, a malformed `secret`, a missing or malformed `app.id`, a malformed `hello.capabilities`. The library sends none to the relay: it drops a message it cannot read. |
 | `unknown_type` | relay | Message type not understood, but an answer was expected. |
-| `unknown_id` | relay | A `grant.revoke` named a grant that is not this page's or has no usable token left (it expired, or was revoked elsewhere); the error has no `id`, and names the grant (`for`, `grantId`, above). The library removes that grant from its list. Late `http.response*` messages for a finished or cancelled `id` get no answer: the relay drops them. |
+| `unknown_id` | relay | A `grant.revoke` named a grant that is not this page's or has no usable token left (it expired, or was revoked elsewhere); the error has no `id`, and names the grant (`for`, `grantId`, above). The library removes that grant from its list. A `member.rename` or `member.remove` named a member that is not in the browser's group, or came from a browser that is not signed in (`for`, `member`). Late `http.response*` messages for a finished or cancelled `id` get no answer: the relay drops them. |
 | `too_large` | relay | A message exceeded `maxMessageBytes`; the relay answers the AI app with 502. The relay refuses it by its length, without parsing it; the error's `id` is taken from the start of the message (send `type` and `id` first). A frame over four times the largest `maxMessageBytes` of any site closes the socket with 1009 instead. |
 | `rate_limited` | relay | The tab sent more control messages than its budget: every message except `pong` and `http.response*` counts, 30 at once, then 2 a second per session. Followed by close 4008. A page sends a handful of these when its dialog opens or its user signs in. |
 | `identity_refused` | relay | An `identity` assertion was refused (bad signature, type, issuer, audience, expiry, a reused `jti`), or `identity`/`identity.logout` came on a site without identity binding. |
-| `store_unavailable` | relay | A `grant.revoke`, `grants.revokeAll` or `identity.logout` failed because the relay's token store failed (for `identity.logout` the binding and the requests in flight end anyway). Nothing was wrong with the message; the session stays, and the tab may send it again later. Relays up to 0.9 answered `bad_message`. |
+| `store_unavailable` | relay | A `grant.revoke`, `grants.revokeAll`, `identity.logout`, `signin.out`, `member.rename` or `member.remove` failed because the relay's token store failed (for `identity.logout` the binding and the requests in flight end anyway). Nothing was wrong with the message; the session stays, and the tab may send it again later. Relays up to 0.9 answered `bad_message`. |
 | `app_not_allowed` | relay | The relay's configuration does not let the page's origin serve the app named in `hello.app.id`: the app is reserved for other origins, or the origin's site lists other apps ([`sites[].apps`](configuration.md#sites)). Followed by close 1008, before a session exists. The library reports it as `policy` and does not reconnect by itself. |
 
 Failures of an MCP request inside the tab are not protocol errors: the tab answers with
@@ -443,6 +522,9 @@ WebSocket protocol pings, so proxies keep the connection open.
 | Idle timeout | 60 min | relay (close 4002) |
 | Session lifetime | 12 h | relay (close 4001) |
 | Sessions per IP / in total | 5 / 500 | relay (HTTP 429 on upgrade) |
+| Sign-in starts per session / per network | 5, then 1 every 30 s / 20, then 1 every 30 s | relay (`signin.failed` `rate_limited`) |
+| Open sign-ins | 1 per session, 10 000 in all, 10 minutes each | relay (`signin.failed` `busy`) |
+| Members per group | 16 | relay (`signin.failed` `group_full`) |
 
 All are configurable on the relay; see [configuration](configuration.md). The
 [threat model](threat-model.md) explains why each exists.

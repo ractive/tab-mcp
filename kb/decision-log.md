@@ -5968,3 +5968,80 @@ another tab; for 750 ms the switches were flat and grey (DEC-160), which reads a
 - A later change of the same tab's tools (`toolchange`, a navigation, a reload) waits in
   the disabled look as before (DEC-160: flat, no opacity), so a click that did nothing
   there is explained.
+
+## DEC-231: a browser's sign-in and its group at the relay
+
+2026-11-26, iteration 53, second pull request (the relay; DEC-229 decided the feature).
+What the plan left open or did not say, decided here; the conservative choice where the
+owner had not decided, marked (open) where the owner may want otherwise.
+
+- **Settings.** `TAB_MCP_SIGN_IN_APPS` (app ids, for the extension
+  `tab-mcp-extension,tab-mcp-extension-firefox`) and, per provider,
+  `TAB_MCP_SIGN_IN_{GOOGLE,MICROSOFT,GITHUB}_CLIENT_ID` and `_CLIENT_SECRET`, both or
+  neither. Apps without a provider, providers without an app, a client id without its
+  secret, all stop the relay at start (as every wrong setting does). Per app, not per
+  site: Firefox's extension origins cannot be listed (DEC-189). Identity binding's
+  `TAB_MCP_OIDC_*` stay as they are; the hosted relay sets Google's client in both.
+- **Who may sign in.** A session of a listed app, whose `hello` names `signin.v1` in the
+  new `capabilities` list, from an extension origin: the redirect URL must be the
+  extension's own (`https://<id>.chromiumapp.org/` with the origin's id; for Firefox any
+  `https://<40 hex>.extensions.allizom.org/`, root only). Every other session gets
+  today's protocol byte for byte, and the relay does not read its binding (owner,
+  2026-11-26: older extensions must work as today). A capability name is versioned
+  (`signin.v1`); an incompatible change gets a new name.
+- **The flow.** `signin.start` → `signin.url`: the relay's own single-use URL
+  (`/signin?flow=`, 10 minutes), which sets a cookie of its own per flow and redirects
+  to the provider; the callback is `/authorize/callback`, a browser flow's `state`
+  starts with `browser.<provider>.` (identity binding's states have no dot; PR 3's AI
+  app sign-in will take another prefix). Callback: the cookie must match (else
+  `browser` and an error page, not the redirect: the browser that comes back may be a
+  victim's), the session must still hold its address (else nothing is redeemed), then
+  the code is redeemed and the binding written, and the browser goes to
+  `redirectUrl?signin=done|failed`. The result travels over the WebSocket
+  (`signin.done` with the display name, or `signin.failed` with a reason). Google and
+  Microsoft share identity binding's ID token checks (`redeemIdToken`, factored out of
+  `oidc.ts`); `prompt=select_account` everywhere, so a browser can choose another
+  account. Google's issuer is accepted with or without `https://`, as Google documents.
+  GitHub supports PKCE S256 for OAuth Apps (its docs, read 2026-11-26), so the flow uses
+  it; `allow_signup=false`; the token is used for one `GET /user` and dropped (not
+  revoked at GitHub).
+- **The key.** SHA-256 over `tab-mcp sign-in`, the provider and the stable id, one per
+  line: Google `iss` (the configured issuer) and `sub`, Microsoft `tid` and `oid` (both
+  GUIDs; the issuer must be `…/{tid}/v2.0` with the token's `tid`), GitHub the numeric
+  `id`. Not keyed: the relay has no secret of its own, and a new required secret was not
+  added for this. Consequence, in the threat model (A16): a copy of the store can be
+  checked against GitHub's public user ids. (open: an optional key setting.)
+- **The group.** Every live binding with the same key; at most 16 (the plan's proposal,
+  adopted), checked atomically in the store's `putBinding`, the 17th refused with
+  `group_full`. Member ids are random (`m_…`), labels come from `signin.start` (default
+  "Browser"), cleaned like AI app names. Any member renames or removes any member
+  (`member.rename`, `member.remove`); removing oneself is signing out. A browser that
+  signs in again with the same account keeps its member id and label and gets 90 days
+  from then; with another account it moves to that group. The group's state (`group`:
+  members with label, online, sign-in time; `self`; `expiresAt`; `maxMembers`) goes to
+  every online member on every change, a member's connect and disconnect included. No
+  mode, pin or tabs yet (PR 3 adds fields; tabs ignore unknown ones).
+- **Lifetime.** 90 days from the sign-in, the plan's proposal adopted, for DEC-062's
+  reason: it bounds a lost or forgotten browser to a quarter. Not a setting (a test hook
+  shortens it). The relay's sweep tells an online member whose 90 days are over
+  (`signin.ended` `expired`) and drops its binding. A signed-in session counts as used: it is not closed as unpaired after 10
+  minutes (DEC-097), since its group needs it online.
+- **The display name** is sent once, in `signin.done`, and neither stored nor logged; on
+  a reconnect the extension shows what it kept. No e-mail address is ever stored.
+- **Limits** (A8's style): starts per session 5, then one per 30 s; per network 20,
+  then one per 30 s; one open flow per session (a new start replaces it), 10 000 in all;
+  views of the sign-in URL and its callback per network 60, then one a second (two per
+  sign-in); 16 members; the session's control budget as for every message.
+- **Store.** Optional binding methods on `TokenStore` (all five or none, conformance
+  tests); a relay with sign-in refuses to start with a store without them rather than
+  keeping bindings in memory. SQLite schema 7 adds a `bindings` table; `min_reader_version`
+  stays 6, since an older relay leaves the table alone. The step to 4 (cutting used
+  refresh tokens) now runs only for files before 4, so this step touches no token row.
+- **Store failures.** A binding that cannot be read at `hello` leaves the session signed
+  out until it connects again (logged); one that cannot be written fails the sign-in
+  (`store_unavailable`); a sign-out, rename or removal that cannot be written is refused
+  with `store_unavailable` and changes nothing.
+- **Not built, recorded as risks (open):** a confirmation page at the relay before the
+  provider ("a browser asks to join your group as …") against someone who gets a user to
+  finish the sign-in of their link; it would cost every sign-in a click, and the
+  announcement to every member plus removal stand in for it now.

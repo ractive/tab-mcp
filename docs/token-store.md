@@ -102,12 +102,19 @@ interface TokenStore {
   listGrants(addressId: string, now: number): Promise<GrantSummary[]>;
   deleteExpired(now: number): Promise<number>;
   claimNonce?(key: string, expiresAt: number, now: number): Promise<boolean>;
+  // Browser sign-in (DEC-231): all five or none.
+  putBinding?(record: BindingRecord, maxMembers: number, now: number): Promise<"ok" | "full">;
+  getBinding?(addressId: string, now: number): Promise<BindingRecord | undefined>;
+  listBindings?(group: string, now: number): Promise<BindingRecord[]>;
+  renameBinding?(group: string, memberId: string, label: string, now: number): Promise<boolean>;
+  deleteBinding?(selector: BindingSelector): Promise<BindingRecord | undefined>;
   close?(): Promise<void>;
 }
 ```
 
-`TokenStore`, `TokenRecord`, `GrantSummary`, `RevokeSelector`, `RevokeOptions` and
-`TokenKind` are exported as types from `@ractive-ch/tab-mcp`. All times are milliseconds since the Unix
+`TokenStore`, `TokenRecord`, `GrantSummary`, `RevokeSelector`, `RevokeOptions`,
+`BindingRecord`, `BindingSelector` and `TokenKind` are exported as types from
+`@ractive-ch/tab-mcp`. All times are milliseconds since the Unix
 epoch.
 
 | Method | What it must do |
@@ -119,6 +126,7 @@ epoch.
 | `listGrants` | The grants of an address id that still have a usable token at `now` (an unexpired access token, or an unexpired and unused refresh token), oldest grant first. The page uses it to list connected apps. |
 | `deleteExpired` | Delete every record with `expiresAt <= now` and every tombstone whose `keepUntil` has passed. Return how many records were deleted. The relay calls it every 10 minutes. It should also drop `claimNonce` entries whose `expiresAt` has passed. |
 | `claimNonce` | Optional (DEC-106): remember `key` (a hash of an AI app's client id and the `jti` of its client assertion) until `expiresAt`. Return `true` for the one call that recorded it, `false` while it is remembered; an entry with `expiresAt <= now` counts as absent. Atomic like `markUsed` (Redis `SET key 1 PXAT expiresAt NX`, SQL `INSERT … ON CONFLICT DO UPDATE … WHERE expires_at <= now`). Without it the relay keeps used `jti`s in its own memory, until it restarts. `expiresAt` is at most about six minutes ahead, and the relay writes at most 10 000 live entries per AI app host, so the table stays small. |
+| `putBinding`, `getBinding`, `listBindings`, `renameBinding`, `deleteBinding` | Optional, all five or none (DEC-231): the sign-ins of browsers, one `BindingRecord` per address id (`group`, a hash of the account; `memberId`, unique; `provider`, `app`, `label`, `createdAt`, `expiresAt`). A binding with `expiresAt <= now` counts as absent in every method, and `deleteExpired` should drop it. `putBinding` inserts or replaces the binding of the record's address id and returns `"full"`, storing nothing, when the group already has `maxMembers` live bindings of other addresses; counting and writing are one atomic step (a transaction), so two browsers cannot both take a group's last place. `listBindings` returns a group's live bindings oldest first (`createdAt`, then `memberId`). `renameBinding` changes the label of a live member of the group and returns whether there was one. `deleteBinding` deletes the binding of an address id or of a member id in a group and returns it. `revoke` leaves bindings alone. A relay with `TAB_MCP_SIGN_IN_APPS` refuses to start with a store that lacks them. |
 | `close` | Optional: release connections or file handles. |
 
 ## Guarantees
