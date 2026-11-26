@@ -1291,3 +1291,52 @@ describe("your browsers: sign-in and the group (DEC-233)", () => {
 		expect(texts(panel, "#sign-in button").length).toBe(3);
 	});
 });
+
+describe("your browsers: a rename while states come (review 2, DEC-233)", () => {
+	const SELF = "m_self000000000000";
+	const OTHER = "m_other00000000000";
+	const state = (online: boolean): PanelState => ({
+		...stateWith([]),
+		signIn: {
+			providers: [],
+			connected: true,
+			account: { providerName: "Google", displayName: "ada@example.com" },
+			members: [
+				{ id: SELF, label: "Chrome on macOS", online: true, self: true },
+				{ id: OTHER, label: "work Chrome", online, self: false },
+			],
+			maxMembers: 16,
+			grants: [],
+		},
+	});
+
+	test("the field keeps what was typed, its selection and its focus; it takes the focus only when renaming starts", async () => {
+		const panel = await openPanel();
+		panel.show(state(false));
+		panel.$<HTMLButtonElement>(`button[data-rename="${OTHER}"]`)?.click();
+		await Promise.resolve();
+		const field = panel.$<HTMLInputElement>(
+			`#members li[data-member="${OTHER}"] input`,
+		);
+		if (field === null) throw new Error("no field");
+		expect(panel.doc.activeElement).toBe(field);
+		field.value = "office Chr";
+		field.setSelectionRange(2, 6);
+		// Another browser comes online meanwhile: the row is not made anew.
+		panel.show(state(true));
+		await Promise.resolve();
+		const after = panel.$<HTMLInputElement>(
+			`#members li[data-member="${OTHER}"] input`,
+		);
+		expect(after).toBe(field);
+		expect(after?.value).toBe("office Chr");
+		expect(panel.doc.activeElement).toBe(field);
+		expect([after?.selectionStart, after?.selectionEnd]).toEqual([2, 6]);
+		// Focus elsewhere: a later state does not take it back to the field.
+		panel.$<HTMLButtonElement>("#sign-out")?.focus();
+		panel.show(state(false));
+		await Promise.resolve();
+		expect(panel.doc.activeElement).not.toBe(field);
+		expect(field.value).toBe("office Chr");
+	});
+});

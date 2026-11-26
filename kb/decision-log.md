@@ -6091,14 +6091,12 @@ had not decided, marked (open) where the owner may want otherwise.
   and signs in again is announced again. A click on the notification does nothing but
   close it (opening the panel would need the window at once, which the event does not
   give).
-- **Microsoft's administrator's approval**: the relay of PR 257 sends
-  `signin_error=provider_error` and drops the provider's `error_description`, so the
-  extension cannot know. It says "Your organisation's administrator has to approve
+- **Microsoft's administrator's approval**: the relay sends
+  `signin_error=admin_approval` for it (PR 258, commit 54bbb8c; before, only
+  `provider_error`). The extension says "Your organisation's administrator has to approve
   tab-mcp relay first." for `signin_error=admin_approval` or an `AADSTS65001`,
   `AADSTS90094` or `AADSTS90095` anywhere in the address the window ended at; for a
-  Microsoft `provider_error` without either it adds that this may be the reason. (Open,
-  for the relay: map Microsoft's `error_description` with those codes to
-  `signin_error=admin_approval`, which this extension already understands.)
+  Microsoft `provider_error` without either it adds that this may be the reason.
 - **What it says** is its own text for every reason of `signin.failed` and of the
   redirect, never the relay's or the provider's code. "Signed in as <name> with
   <provider>", for Microsoft with "(personal account)" or "(work or school account)"
@@ -6110,13 +6108,22 @@ had not decided, marked (open) where the owner may want otherwise.
   `signin.start`. Rename in the row (a field, Save, Cancel), any member. Remove only
   for the others (this browser's own is Sign out), asked first ("Remove? Click again",
   no double click), as the group's Disconnect is.
+- **A new session drops the setting loaded before it** whenever it names this
+  browser's member, and so does a lost connection while a sign-in is kept: the next call
+  waits for the session's `group` (up to 2 s) instead of going by what an earlier worker
+  or session knew (after a restart, "the tab in front"); a `group` that moves the target
+  drops it before anything is written (review of PR 259). One `signin.url` is taken per
+  start; a malformed one or another provider's ends the sign-in with a reason. No `focus`
+  is sent while the group's focus is this browser already.
 - **The sign-in buttons wait** 750 ms after they came or moved, in the disabled look,
   and ignore a click in the quiet after the questions' dialog (ES 5, DEC-228): a sign-in
   lets the group's AI apps reach this browser. The flow opens only an address of the
   relay's own origin; another `signin.url` is refused and said so.
 - **What is kept**: the provider, the name and the kind in IndexedDB, forgotten at
-  sign-out, at `signin.ended`, when a session says this browser is not signed in, and
-  when the relay changes. "Disconnect all apps" signs out first: its new secret is a new
+  sign-out, at `signin.ended`, at a session of a relay that offers no sign-in, and when
+  the relay changes. A session that offers sign-in but names no member for this browser
+  (the relay could not read its binding, say) leaves them kept, unused and not shown,
+  until `signin.ended` or the next session says otherwise (review of PR 259). "Disconnect all apps" signs out first: its new secret is a new
   browser to the relay, and the old one would stay a member that never comes back.
 - **The group's AI apps count as connected**: for the state line and the icon ("on"),
   the names pages with the tab-mcp library are told (they reach those pages too) and the

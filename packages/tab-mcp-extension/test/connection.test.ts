@@ -23,6 +23,7 @@ import { memoryKv } from "../src/worker/kv.ts";
 import { ARGS_CUT_NOTE } from "../src/worker/questions.ts";
 import { CachedSecretStorage } from "../src/worker/secret.ts";
 import { SignIn } from "../src/worker/signin.ts";
+import { PINNED_ELSEWHERE } from "../src/worker/targets.ts";
 
 const ID = "abcdefghijklmnopabcdefghijklmnop";
 const SITE = "https://shop.example";
@@ -1269,27 +1270,156 @@ describe("signed in at the relay, and the group (DEC-233)", () => {
 		await stop();
 	});
 
-	test("a session that is not signed in any more forgets what was kept; a refusal of a group message is the sign-in's line, not the connection's problem", async () => {
-		const { panel, socket, kv, stop } = await signedIn(
+	test("review 4: a session without this browser's member keeps the sign-in, unused and not shown; a relay without sign-in forgets it; a refusal of a group message is the sign-in's line", async () => {
+		const first = await signedIn(
 			{ providers: PROVIDERS },
 			{ stored: { signInAccount: ACCOUNT } },
 		);
 		await until(
-			() => panel.state()?.signIn?.providers.length === 2,
+			() => first.panel.state()?.signIn?.providers.length === 2,
 			"the buttons",
 		);
-		expect(kv.data.get("signInAccount")).toBeUndefined();
-		socket.deliver({
+		expect(first.kv.data.get("signInAccount")).toEqual(ACCOUNT);
+		expect(first.panel.state()?.signIn?.account).toBeUndefined();
+		expect(first.panel.state()?.signIn?.members).toBeUndefined();
+		first.socket.deliver({
 			type: "error",
 			code: "unknown_id",
 			message: "not signed in",
 			for: "group.mode",
 		});
 		await until(
-			() => panel.state()?.signIn?.problem !== undefined,
+			() => first.panel.state()?.signIn?.problem !== undefined,
 			"the sign-in's problem",
 		);
-		expect(panel.state()?.problem).toBeUndefined();
+		expect(first.panel.state()?.problem).toBeUndefined();
+		await first.stop();
+		// The same browser at a relay that offers no sign-in.
+		const second = await signedIn(undefined, {
+			stored: { signInAccount: ACCOUNT },
+		});
+		await until(() => !second.kv.data.has("signInAccount"), "forgotten");
+		expect(second.panel.state()?.signIn).toBeUndefined();
+		await second.stop();
+	});
+
+	test("review 1: after a worker restart, a call that comes before the session's group waits for it and goes where it says, never to the tab in front", async () => {
+		FakeSocket.relay = { signIn: { providers: PROVIDERS, member: SELF } };
+		const { c } = await connection({
+			tools: [pageTool("look", true)],
+			stored: { signInAccount: ACCOUNT },
+		});
+		const panel = fakePanel();
+		const receive = c.addPanel(panel.port);
+		// Read before the session: what a new worker knows, the default.
+		await until(() => panel.state()?.target !== undefined, "the setting read");
+		expect(panel.state()?.target?.mode).toBe("front");
+		receive({ type: "connect" });
+		await until(
+			() => panel.state()?.status === "waiting",
+			"connected, no group yet",
+		);
+		const socket = FakeSocket.last;
+		if (socket === undefined) throw new Error("no socket");
+		let settled = false;
+		const call = callTool("page_info").finally(() => {
+			settled = true;
+		});
+		await Bun.sleep(50);
+		expect(settled).toBe(false);
+		socket.deliver(
+			group({
+				members: [
+					{ id: SELF, label: "Chrome on macOS", online: true },
+					{ id: OTHER_MEMBER, label: "work Chrome", online: true },
+				],
+				mode: "pinned",
+				pin: { member: OTHER_MEMBER, tab: "77" },
+			}),
+		);
+		await expect(call).rejects.toThrow(PINNED_ELSEWHERE);
+		receive({ type: "stop" });
+		await until(() => panel.state()?.status === "off", "off");
+	});
+
+	test("review 3: one signin.url per start; a malformed one or another provider's ends the sign-in with a reason", async () => {
+		const { panel, receive, socket, fake, stop } = await signedIn({
+			providers: PROVIDERS,
+		});
+		fake.authFlow = async () => `https://${ID}.chromiumapp.org/?signin=code-1`;
+		const start = async (n: number) => {
+			receive({ type: "sign-in", provider: "google" });
+			await until(() => socket.of("signin.start").length === n, "start");
+		};
+		const unusable =
+			"The relay's answer to the sign-in could not be used. Try again.";
+		await start(1);
+		socket.deliver({
+			type: "signin.url",
+			provider: "github",
+			url: `${RELAY}/signin?flow=a`,
+		});
+		await until(() => panel.state()?.signIn?.problem === unusable, "mismatch");
+		expect(panel.state()?.signIn?.pending).toBeUndefined();
+		await start(2);
+		socket.deliver({ type: "signin.url", provider: "google", url: "::nope" });
+		await until(() => panel.state()?.signIn?.problem === unusable, "malformed");
+		await start(3);
+		for (const flow of ["b", "c"])
+			socket.deliver({
+				type: "signin.url",
+				provider: "google",
+				url: `${RELAY}/signin?flow=${flow}`,
+			});
+		await until(() => socket.of("signin.complete").length === 1, "complete");
+		await Bun.sleep(20);
+		expect(fake.authUrls).toEqual([`${RELAY}/signin?flow=b`]);
+		expect(socket.of("signin.complete").length).toBe(1);
+		await stop();
+	});
+
+	test("review 5: with the pin in another browser, the panel still lists the tools of the tab in front", async () => {
+		const { panel, socket, stop } = await signedIn(
+			{ providers: PROVIDERS, member: SELF },
+			{ tools: [pageTool("look", true), pageTool("buy", false)] },
+		);
+		socket.deliver(
+			group({
+				members: [
+					{ id: SELF, label: "Chrome on macOS", online: true },
+					{ id: OTHER_MEMBER, label: "work Chrome", online: true },
+				],
+				mode: "pinned",
+				pin: { member: OTHER_MEMBER, tab: "77" },
+			}),
+		);
+		await until(() => panel.state()?.target?.elsewhere === true, "elsewhere");
+		await Bun.sleep(50);
+		await until(
+			() => (panel.state()?.tab?.tools.length ?? 0) === 2,
+			"the tools listed",
+		);
+		expect(panel.state()?.tab?.tools.map((t) => t.name)).toEqual([
+			"look",
+			"buy",
+		]);
+		expect(panel.state()?.tab?.canAllow).toBe(true);
+		await stop();
+	});
+
+	test("review 6: no focus when calls go to this browser already", async () => {
+		const { c, socket, stop } = await signedIn({
+			providers: PROVIDERS,
+			member: SELF,
+		});
+		socket.deliver(group({ focus: SELF }));
+		await Bun.sleep(30);
+		c.windowFocused(1);
+		expect(socket.of("focus")).toEqual([]);
+		socket.deliver(group({ focus: OTHER_MEMBER }));
+		await Bun.sleep(20);
+		c.windowFocused(1);
+		expect(socket.of("focus")).toEqual([{ type: "focus" }]);
 		await stop();
 	});
 });

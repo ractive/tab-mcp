@@ -418,8 +418,9 @@ relay that does not know it answers as before. Codes keep working, signed in or 
   whose company lets no user consent to the app: "Your organisation's administrator has
   to approve tab-mcp relay first." when the relay or the provider's answer says so
   (`signin_error=admin_approval`, or an `AADSTS65001`, `AADSTS90094` or `AADSTS90095` in
-  the address the window ended at); today's relay sends only `provider_error` then, and
-  for Microsoft the panel adds that this may be the reason.
+  the address the window ended at; the relay sends `admin_approval` for it from PR 258's
+  review on); for a Microsoft `provider_error` without either the panel adds that this
+  may be the reason.
 - **Signed in**: "Signed in as <name> with <provider>", for Microsoft with "(personal
   account)" or "(work or school account)" (one address can name both, two accounts and two
   groups). The relay sends the name and the kind once and keeps neither; the extension

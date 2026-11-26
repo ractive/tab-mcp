@@ -353,6 +353,8 @@ export class SignIn {
 	#groupWait: { promise: Promise<void>; resolve: () => void } | undefined;
 	/** The flow that runs (a newer start makes the one before count for nothing). */
 	#flow = 0;
+	/** This start's `signin.url` came: one per start. */
+	#urlTaken = false;
 	/** Messages to the relay, one after the other: the account's writes keep their order. */
 	#queue: Promise<unknown> = Promise.resolve();
 
@@ -456,7 +458,9 @@ export class SignIn {
 		this.#flow++;
 		this.#groupWait?.resolve();
 		this.#groupWait = undefined;
-		if (this.active !== was) this.#host.targetsChanged();
+		// A kept sign-in: the setting is loaded again from what is known.
+		if (this.active !== was || this.#account !== undefined)
+			this.#host.targetsChanged();
 		this.#host.changed();
 	}
 
@@ -482,11 +486,16 @@ export class SignIn {
 				resolve = r;
 			});
 			this.#groupWait = { promise, resolve };
-		} else if (this.#account !== undefined) {
-			// Not signed in at this relay (any more): what was kept goes.
+		} else if (signIn === undefined && this.#account !== undefined) {
+			// A relay that offers no sign-in: what was kept goes. Without a
+			// member (the relay could not read the binding, say) it is kept,
+			// unused and not shown, until `signin.ended` says it is over.
 			this.#run(() => this.#forget());
 		}
-		if (this.active !== was) this.#host.targetsChanged();
+		// Signed in: a setting loaded before this session (after a worker
+		// restart, the default) is not used; the next call waits for `group`.
+		if (this.#member !== undefined || this.active !== was)
+			this.#host.targetsChanged();
 		this.#host.changed();
 	}
 
@@ -499,6 +508,7 @@ export class SignIn {
 		this.#problem = undefined;
 		this.#notice = undefined;
 		this.#pending = offered;
+		this.#urlTaken = false;
 		this.#flow++;
 		this.#host.changed();
 		const sent = this.#host.send({
@@ -516,13 +526,20 @@ export class SignIn {
 
 	#url(m: Readonly<Json>): void {
 		const provider = this.#pending;
+		// One per start; none without one.
+		if (provider === undefined || this.#urlTaken) return;
+		this.#urlTaken = true;
 		const url = m["url"];
-		if (provider === undefined || m["provider"] !== provider.id || !str(url))
-			return;
-		let start: URL;
+		let start: URL | undefined;
 		try {
-			start = new URL(url);
+			start = str(url) ? new URL(url) : undefined;
 		} catch {
+			start = undefined;
+		}
+		if (start === undefined || m["provider"] !== provider.id) {
+			this.#fail(
+				"The relay's answer to the sign-in could not be used. Try again.",
+			);
 			return;
 		}
 		// The relay's own page, nothing else.
@@ -698,6 +715,13 @@ export class SignIn {
 		this.#group = record;
 		this.#groupWait?.resolve();
 		this.#groupWait = undefined;
+		const where = (g: GroupRecord | undefined) =>
+			JSON.stringify([g?.mode, g?.pin, g?.self]);
+		const named = (g: GroupRecord | undefined) =>
+			JSON.stringify([g?.focus, g?.members.map((x) => x.label)]);
+		// Before the write below: a call meanwhile goes where the group says.
+		const moved = where(before) !== where(record);
+		if (moved) this.#host.targetsChanged();
 		const ids = record.members.map((x) => x.id);
 		const known = this.#known;
 		const joined =
@@ -716,12 +740,7 @@ export class SignIn {
 			await this.#kv.set({ [KNOWN]: this.#known });
 		}
 		if (joined.length > 0) this.#announce(joined.map((x) => x.label));
-		const where = (g: GroupRecord | undefined) =>
-			JSON.stringify([g?.mode, g?.pin, g?.self]);
-		const named = (g: GroupRecord | undefined) =>
-			JSON.stringify([g?.focus, g?.members.map((x) => x.label)]);
-		if (where(before) !== where(record)) this.#host.targetsChanged();
-		else if (named(before) !== named(record)) this.#host.targetShown();
+		if (!moved && named(before) !== named(record)) this.#host.targetShown();
 		// The relay learns which browser is in use in mode "front" only: once
 		// as the group comes after a connect, and as the mode turns to it.
 		if (record.mode === "front" && before?.mode !== "front")
@@ -753,7 +772,10 @@ export class SignIn {
 	 * the user's switching.
 	 */
 	windowFocused(): void {
-		if (this.#member === undefined || this.#group?.mode !== "front") return;
+		const group = this.#group;
+		if (this.#member === undefined || group?.mode !== "front") return;
+		// Calls go here already: nothing to tell.
+		if (group.focus === this.#member) return;
 		this.#host.send({ type: "focus" });
 	}
 
@@ -821,7 +843,8 @@ export class SignIn {
 				connected && this.#member === undefined ? (this.#providers ?? []) : [],
 			connected,
 		};
-		if (account !== undefined) {
+		// Kept but not signed in at this session: not shown.
+		if (account !== undefined && this.active) {
 			const { provider: _, ...shown } = account;
 			view.account = shown;
 		}

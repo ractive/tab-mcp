@@ -81,6 +81,8 @@ export function accountPanel(
 	let shownAs = "";
 	/** The member being renamed, if any. */
 	let renaming: string | undefined;
+	/** Renaming just started: its field takes the focus once. */
+	let focusRename = false;
 	/** Armed: the members whose Remove, the grants whose Disconnect, was clicked once. */
 	const armed = new Map<
 		string,
@@ -172,7 +174,10 @@ export function accountPanel(
 				draw();
 			});
 			li.append(form);
-			queueMicrotask(() => input.focus());
+			if (focusRename) {
+				focusRename = false;
+				queueMicrotask(() => input.focus());
+			}
 			return li;
 		}
 		const who = document.createElement("span");
@@ -199,6 +204,7 @@ export function accountPanel(
 			actions.append(
 				button("Rename", { rename: member.id }, () => {
 					renaming = member.id;
+					focusRename = true;
 					draw();
 				}),
 			);
@@ -294,9 +300,31 @@ export function accountPanel(
 		const members = v.members ?? [];
 		if (renaming !== undefined && !members.some((m) => m.id === renaming))
 			renaming = undefined;
+		// The row being renamed stays as it is, with what was typed, its
+		// selection and its focus: a state that comes meanwhile (a member
+		// online, a notice) must not take the draft away.
+		const editing =
+			renaming === undefined
+				? null
+				: el.members.querySelector<HTMLElement>(
+						`li[data-member="${CSS.escape(renaming)}"]`,
+					);
+		const field = editing?.querySelector("input") ?? null;
+		const draft =
+			field !== null && document.activeElement === field
+				? [field.selectionStart, field.selectionEnd]
+				: undefined;
 		el.members.replaceChildren(
-			...members.map((m) => memberRow(m, v.connected)),
+			...members.map((m) =>
+				m.id === renaming && field !== null && editing !== null
+					? editing
+					: memberRow(m, v.connected),
+			),
 		);
+		if (field !== null && draft !== undefined) {
+			field.focus();
+			field.setSelectionRange(draft[0] ?? null, draft[1] ?? null);
+		}
 		const removing = [...armed.keys()].some((k) => k.startsWith("member:"));
 		el.membersNote.hidden = members.length === 0;
 		setText(

@@ -1441,7 +1441,11 @@ export class Connection {
 			// pinned one), a read of the tab in front of its own: the panel
 			// lists the tools of the tab it shows.
 			let state = this.#bridge.state;
-			if (state.tabId !== tab.id && target.pinned?.tabId !== undefined)
+			// (or in another browser of the group: the bridge offers none here)
+			if (
+				state.tabId !== tab.id &&
+				(target.pinned?.tabId !== undefined || target.elsewhere === true)
+			)
 				state = await this.#bridge.stateOf(tab, { refresh: false });
 			tools = state;
 			// The bridge's last read is of this tab and its site. Not the

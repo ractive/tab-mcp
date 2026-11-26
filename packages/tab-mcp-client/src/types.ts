@@ -476,7 +476,7 @@ export interface RelayMessages {
 	/**
 	 * Named in `hello.capabilities`: at most 16 names of 1 to 32 characters
 	 * of `a-z`, `0-9`, `.` and `-`, starting with a letter or digit (else
-	 * the constructor throws a `TypeError`), such as `signin.v1`.
+	 * `connect()` rejects with a `TypeError`), such as `signin.v1`.
 	 */
 	capabilities: readonly string[];
 	/**
