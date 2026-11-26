@@ -57,6 +57,7 @@
 			<p class="code-line"><code id="code" class="code">––––-––––</code>
 				<button id="copy-code" type="button" class="quiet small copy" aria-label="Copy code" disabled>Copy</button></p>
 			<p class="muted small">The code changes every 2 minutes and after each use.</p>
+			<p id="pairing-group" class="muted small" hidden></p>
 			<div id="fill" class="fill" hidden>
 				<label id="fill-label" class="allow-switch"><input id="fill-switch" type="checkbox" role="switch" aria-checked="false" aria-describedby="fill-text"><span>Fill in the code for me</span></label>
 				<p id="fill-text" class="muted small"></p>
@@ -116,6 +117,27 @@
 		</div>
 	</section>
 
+	<section id="account" class="card" aria-labelledby="account-heading" hidden>
+		<h2 id="account-heading">Your browsers</h2>
+		<p id="account-intro" class="muted small" hidden>Sign in, and an AI app connects once for all your browsers signed in with the same account, instead of with a code in each. Codes keep working without it.</p>
+		<div id="sign-in" class="buttons sign-in" hidden></div>
+		<p id="sign-in-pending" class="muted small" role="status" hidden></p>
+		<p id="signed-in" class="signed-in" role="status" hidden></p>
+		<div id="account-notice-box" class="notice" hidden>
+			<p id="account-notice" role="status"></p>
+			<button id="account-notice-ok" type="button" class="quiet small" aria-label="Dismiss">OK</button>
+		</div>
+		<p id="account-problem" class="problem" role="alert" hidden></p>
+		<ul id="members" class="grants members" aria-label="Your browsers"></ul>
+		<p id="members-note" class="muted small" hidden></p>
+		<h3 id="group-grants-heading" hidden>AI apps connected to all your browsers</h3>
+		<ul id="group-grants" class="grants" aria-labelledby="group-grants-heading"></ul>
+		<p id="account-off" class="muted small" hidden>Turn on AI access to sign in or out, and to see your browsers.</p>
+		<div class="buttons">
+			<button id="sign-out" type="button" class="quiet" hidden>Sign out</button>
+		</div>
+	</section>
+
 	<details class="settings" open>
 		<summary>Settings</summary>
 		<form id="relay-form">
@@ -133,6 +155,7 @@
 				<option value="pinned">a pinned tab</option>
 			</select>
 			<p id="target-mode-note" class="muted small">A pinned tab stays where AI apps work when you switch tabs; the first call pins the tab in front, and "Work here" pins another. An AI app can also pin a tab it may use.</p>
+			<p id="target-mode-group" class="muted small" hidden>While signed in, this setting is the same in all your browsers.</p>
 		</div>
 	</details>
 </main>

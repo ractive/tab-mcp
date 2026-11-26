@@ -24,6 +24,7 @@ import {
 } from "../protocol.ts";
 import { relayProblem } from "../relay.ts";
 import { ALL_SITES } from "../tabs.ts";
+import { accountPanel, pairingGroupText } from "./account.ts";
 import { CallsView, summaryText } from "./calls.ts";
 import {
 	allowAllLabel,
@@ -561,6 +562,7 @@ function arm(): void {
 	))
 		setAvailable(control, now >= movedUntil);
 	setAvailable($("work-here"), now >= Math.max(movedUntil, workHereUntil));
+	account.arm(now, movedUntil);
 	// The quiet after the dialog, for the end-to-end tests: no look.
 	document.body.toggleAttribute("data-quiet", now < quietUntil);
 }
@@ -569,7 +571,7 @@ setInterval(() => {
 	const now = Date.now();
 	if (
 		cards.size > 0 ||
-		now < Math.max(movedUntil, quietUntil, workHereUntil) + 200
+		now < Math.max(movedUntil, quietUntil, workHereUntil, account.until()) + 200
 	)
 		arm();
 }, 100);
@@ -776,7 +778,32 @@ function showTarget(s: PanelState): void {
 		if (shown) workHereUntil = Date.now() + ALLOW_DELAY_MS;
 	}
 	setAvailable(button, Date.now() >= Math.max(movedUntil, workHereUntil));
+	// Signed in, the setting is the group's (DEC-233).
+	$("target-mode-group").hidden = s.signIn?.members === undefined;
 }
+
+/** "Your browsers": the sign-in and the group (DEC-233). */
+const account = accountPanel(
+	{
+		card: $("account"),
+		intro: $("account-intro"),
+		signIn: $("sign-in"),
+		pending: $("sign-in-pending"),
+		signedIn: $("signed-in"),
+		noticeBox: $("account-notice-box"),
+		notice: $("account-notice"),
+		noticeOk: $("account-notice-ok"),
+		problem: $("account-problem"),
+		members: $("members"),
+		membersNote: $("members-note"),
+		grantsHeading: $("group-grants-heading"),
+		grants: $("group-grants"),
+		off: $("account-off"),
+		signOut: $("sign-out"),
+	},
+	(command) => send(command),
+	{ quiet, waitMs: ALLOW_DELAY_MS },
+);
 
 /** The "Fill in the code for me" switch under "Connect your AI app" (DEC-203, DEC-210). */
 const fill = fillPanel(
@@ -808,6 +835,10 @@ function show(s: PanelState): void {
 	showCallCount();
 	showFillNotice(s);
 	fill.show(s);
+	account.show(s);
+	const group = pairingGroupText(s.signIn);
+	$("pairing-group").hidden = group === "";
+	setText($("pairing-group"), group);
 	showQuestions(s.questions, s.expired);
 	showTab(s);
 	showTarget(s);

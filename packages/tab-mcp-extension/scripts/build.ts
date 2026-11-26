@@ -146,6 +146,8 @@ export function createManifest(
 		permissions: [
 			"activeTab",
 			"alarms",
+			// `launchWebAuthFlow` alone: signing in at the relay (DEC-233).
+			"identity",
 			"notifications",
 			"scripting",
 			"sidePanel",
@@ -209,10 +211,12 @@ export function createFirefoxManifest(
 			default_icon: icons,
 			open_at_install: false,
 		},
-		// `storage` for `storage.session` alone: the pinned tab (DEC-230).
+		// `storage` for `storage.session` alone: the pinned tab (DEC-230);
+		// `identity` for `launchWebAuthFlow` alone, the sign-in (DEC-233).
 		permissions: [
 			"activeTab",
 			"alarms",
+			"identity",
 			"notifications",
 			"scripting",
 			"storage",

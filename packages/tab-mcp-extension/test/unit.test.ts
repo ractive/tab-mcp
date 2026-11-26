@@ -67,6 +67,7 @@ describe("manifest", () => {
 		expect(manifest["permissions"]).toEqual([
 			"activeTab",
 			"alarms",
+			"identity",
 			"notifications",
 			"scripting",
 			"sidePanel",

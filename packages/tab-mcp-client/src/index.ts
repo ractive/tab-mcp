@@ -28,6 +28,7 @@ export type {
 	PairingCodeReason,
 	ReconnectingInfo,
 	RelayClient,
+	RelayMessages,
 	ReplacedDetail,
 	SecretStorage,
 	ServeHandle,

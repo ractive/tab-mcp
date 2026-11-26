@@ -1130,3 +1130,72 @@ describe("telling a sibling tab from an impostor (review of PR 39, DEC-095)", ()
 		expect((await replaced).detail).toEqual({ sibling: false });
 	});
 });
+
+describe("messages the library does not speak (relayMessages, DEC-233)", () => {
+	type Send = (m: { type: string } & Record<string, unknown>) => boolean;
+	test("capabilities in hello; the session as it came, then each unknown type, in order, with the session's send", async () => {
+		const got: Record<string, unknown>[] = [];
+		let send: Send | undefined;
+		const tab = newTab(relay.url, {
+			relayMessages: {
+				capabilities: ["signin.v1"],
+				receive: (m, s) => {
+					got.push({ ...m });
+					send = s;
+				},
+			},
+		});
+		try {
+			await tab.connect();
+			const hello = await relay.next("hello");
+			expect(hello["capabilities"]).toEqual(["signin.v1"]);
+			expect(got.map((m) => m["type"])).toEqual(["session"]);
+			relay.send({ type: "group", members: [] });
+			// A known type the library cannot read is still the library's.
+			relay.send({ type: "pairing.code" });
+			relay.send({ type: "signin.url", url: "https://relay.example/signin" });
+			relay.send("not json");
+			await relay.settled();
+			expect(got.map((m) => m["type"])).toEqual([
+				"session",
+				"group",
+				"signin.url",
+			]);
+			expect(got[2]).toEqual({
+				type: "signin.url",
+				url: "https://relay.example/signin",
+			});
+			expect(send?.({ type: "group.mode", mode: "front" })).toBe(true);
+			expect(await relay.next("group.mode")).toEqual({
+				type: "group.mode",
+				mode: "front",
+			});
+			// The library's own types are its own.
+			for (const type of ["hello", "grant.revoke", "pong", "identity"])
+				expect(() => send?.({ type })).toThrow(TypeError);
+			// Over: the session's send sends nothing.
+			tab.disconnect();
+			expect(send?.({ type: "signin.out" })).toBe(false);
+		} finally {
+			tab.disconnect();
+		}
+	});
+
+	test("without it: no capabilities in hello; capabilities the relay would refuse: connect() rejects", async () => {
+		await t.connect();
+		const hello = await relay.next("hello");
+		expect("capabilities" in hello).toBe(false);
+		for (const capabilities of [
+			["Signin.v1"],
+			["-x"],
+			["a".repeat(33)],
+			Array.from({ length: 17 }, (_, i) => `c${i}`),
+		]) {
+			const bad = newTab(relay.url, {
+				relayMessages: { capabilities, receive: () => {} },
+			});
+			await expect(bad.connect()).rejects.toThrow(TypeError);
+			expect(bad.state).toBe("disconnected");
+		}
+	});
+});

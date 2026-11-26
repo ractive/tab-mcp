@@ -8,18 +8,28 @@ import type { TabView, TargetView } from "../protocol.ts";
 
 export const TARGET_PREFIX = "AI apps work in: ";
 
-/** The line: the tab in front, or the pinned tab by its title. */
+/**
+ * The line: the tab in front, or the pinned tab by its title. Signed in
+ * (DEC-233), the browser of the group comes first where the relay named it
+ * ("work Chrome › Shop (pinned)", "this browser › the tab in front").
+ */
 export function targetLine(target: TargetView | undefined): string {
+	const browser = target?.browser;
+	const where =
+		browser === undefined
+			? TARGET_PREFIX
+			: `${TARGET_PREFIX}${browser.self ? "this browser" : browser.label} › `;
 	if (target === undefined || target.mode === "front")
-		return `${TARGET_PREFIX}the tab in front`;
+		return `${where}the tab in front`;
+	if (target.elsewhere) return `${where}a tab there (pinned)`;
 	const { pinned } = target;
 	if (pinned === undefined)
 		return `${TARGET_PREFIX}the tab in front, pinned at their next call`;
 	if (pinned.closed)
-		return `${TARGET_PREFIX}a pinned tab that was closed. Their calls fail until a tab is pinned again: Work here on another tab.`;
+		return `${where}a pinned tab that was closed. Their calls fail until a tab is pinned again: Work here on another tab.`;
 	if (pinned.title === "")
-		return `${TARGET_PREFIX}a tab the extension may not read now (pinned)`;
-	return `${TARGET_PREFIX}${pinned.title} (pinned)`;
+		return `${where}a tab the extension may not read now (pinned)`;
+	return `${where}${pinned.title} (pinned)`;
 }
 
 /**

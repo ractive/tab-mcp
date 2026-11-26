@@ -1015,3 +1015,279 @@ describe("the Firefox build's panel", () => {
 		expect(html.toLowerCase()).not.toContain("for-chrome");
 	});
 });
+
+describe("your browsers: sign-in and the group (DEC-233)", () => {
+	const SELF = "m_self000000000000";
+	const OTHER = "m_other00000000000";
+	const providers = [
+		{ id: "google", name: "Google" },
+		{ id: "microsoft", name: "Microsoft" },
+		{ id: "github", name: "GitHub" },
+	];
+	const withSignIn = (signIn: PanelState["signIn"]): PanelState => ({
+		...stateWith([]),
+		...(signIn === undefined ? {} : { signIn }),
+	});
+	const signedIn = (
+		more: Partial<NonNullable<PanelState["signIn"]>> = {},
+	): PanelState =>
+		withSignIn({
+			providers: [],
+			connected: true,
+			account: {
+				providerName: "Microsoft",
+				displayName: "ada@example.ch",
+				kind: "work",
+			},
+			members: [
+				{ id: SELF, label: "Chrome on macOS", online: true, self: true },
+				{ id: OTHER, label: "work Chrome", online: false, self: false },
+			],
+			maxMembers: 16,
+			grants: [{ grantId: "g_group", name: "Claude", host: "claude.ai" }],
+			...more,
+		});
+	const texts = (
+		panel: Awaited<ReturnType<typeof openPanel>>,
+		selector: string,
+	) => [...panel.doc.querySelectorAll(selector)].map((e) => e.textContent);
+
+	test("a relay that offers no sign-in: nothing of it shows", async () => {
+		const panel = await openPanel();
+		panel.show(stateWith([]));
+		expect(panel.$("#account")?.hidden).toBe(true);
+		expect(panel.$("#pairing-group")?.hidden).toBe(true);
+		expect(panel.$("#target-mode-group")?.hidden).toBe(true);
+	});
+
+	test("the buttons of the providers offered, in their order; they wait after they came, then send the sign-in", async () => {
+		const panel = await openPanel();
+		panel.show(withSignIn({ providers, connected: true }));
+		expect(panel.$("#account")?.hidden).toBe(false);
+		expect(panel.$("#account-intro")?.hidden).toBe(false);
+		expect(texts(panel, "#sign-in button")).toEqual([
+			"Sign in with Google",
+			"Sign in with Microsoft",
+			"Sign in with GitHub",
+		]);
+		const microsoft = () =>
+			panel.$<HTMLButtonElement>('#sign-in button[data-provider="microsoft"]');
+		// Just came: a click meant for what was there signs nothing in.
+		expect(disabled(microsoft())).toBe("true");
+		panel.take();
+		microsoft()?.click();
+		expect(panel.take()).toEqual([]);
+		panel.later(WAIT_MS);
+		expect(disabled(microsoft())).toBeNull();
+		microsoft()?.click();
+		expect(panel.take()).toEqual([{ type: "sign-in", provider: "microsoft" }]);
+		// Under way: no buttons, a short line.
+		panel.show(
+			withSignIn({ providers, connected: true, pending: "Microsoft" }),
+		);
+		expect(panel.$("#sign-in")?.hidden).toBe(true);
+		expect(panel.$("#sign-in-pending")?.textContent).toBe(
+			"Signing in with Microsoft… Finish it in the window that opened.",
+		);
+		expect(panel.$("#sign-in-pending")?.getAttribute("role")).toBe("status");
+		// The buttons came back: they wait again.
+		panel.show(
+			withSignIn({
+				providers,
+				connected: true,
+				problem:
+					"Your organisation's administrator has to approve tab-mcp relay first.",
+			}),
+		);
+		expect(disabled(microsoft())).toBe("true");
+		expect(panel.$("#account-problem")?.textContent).toBe(
+			"Your organisation's administrator has to approve tab-mcp relay first.",
+		);
+		expect(panel.$("#account-problem")?.getAttribute("role")).toBe("alert");
+	});
+
+	test("signed in: the name with the provider and, for Microsoft, the kind; the browsers with this one marked; the setting is all of theirs", async () => {
+		const panel = await openPanel();
+		panel.show(signedIn());
+		expect(panel.$("#signed-in")?.textContent).toBe(
+			"Signed in as ada@example.ch with Microsoft (work or school account)",
+		);
+		panel.show(
+			signedIn({
+				account: {
+					providerName: "Microsoft",
+					displayName: "ada@outlook.com",
+					kind: "personal",
+				},
+			}),
+		);
+		expect(panel.$("#signed-in")?.textContent).toBe(
+			"Signed in as ada@outlook.com with Microsoft (personal account)",
+		);
+		panel.show(
+			signedIn({ account: { providerName: "GitHub", displayName: "ada" } }),
+		);
+		expect(panel.$("#signed-in")?.textContent).toBe(
+			"Signed in as ada with GitHub",
+		);
+		expect(panel.$("#sign-in")?.hidden).toBe(true);
+		expect(texts(panel, "#members .app")).toEqual([
+			"Chrome on macOS this browser · online",
+			"work Chrome not online",
+		]);
+		// This browser has no Remove: its own is Sign out.
+		expect(texts(panel, `#members li[data-member="${SELF}"] button`)).toEqual([
+			"Rename",
+		]);
+		expect(texts(panel, `#members li[data-member="${OTHER}"] button`)).toEqual([
+			"Rename",
+			"Remove",
+		]);
+		expect(panel.$("#sign-out")?.hidden).toBe(false);
+		expect(panel.$("#target-mode-group")?.hidden).toBe(false);
+		// The labels are text, never markup.
+		panel.show(
+			signedIn({
+				members: [{ id: SELF, label: "<b>x</b>", online: true, self: true }],
+			}),
+		);
+		expect(panel.$("#members b")).toBeNull();
+		panel.take();
+		panel.$<HTMLButtonElement>("#sign-out")?.click();
+		expect(panel.take()).toEqual([{ type: "sign-out" }]);
+	});
+
+	test("Rename: a field in the row, Save sends the new name; Cancel sends nothing", async () => {
+		const panel = await openPanel();
+		panel.show(signedIn());
+		panel.$<HTMLButtonElement>(`button[data-rename="${OTHER}"]`)?.click();
+		const input = panel.$<HTMLInputElement>(
+			`#members li[data-member="${OTHER}"] input`,
+		);
+		expect(input?.value).toBe("work Chrome");
+		expect(input?.getAttribute("aria-label")).toBe("New name for work Chrome");
+		if (input === null) throw new Error("no field");
+		input.value = "  office Chrome ";
+		panel.take();
+		panel
+			.$<HTMLFormElement>(`#members li[data-member="${OTHER}"] form`)
+			?.dispatchEvent(
+				new (g["Event"] as typeof Event)("submit", { cancelable: true }),
+			);
+		expect(panel.take()).toEqual([
+			{ type: "rename-member", member: OTHER, label: "office Chrome" },
+		]);
+		expect(panel.$(`#members li[data-member="${OTHER}"] input`)).toBeNull();
+		panel.$<HTMLButtonElement>(`button[data-rename="${SELF}"]`)?.click();
+		const cancel = [
+			...panel.doc.querySelectorAll<HTMLButtonElement>(
+				`#members li[data-member="${SELF}"] button`,
+			),
+		].find((b) => b.textContent === "Cancel");
+		cancel?.click();
+		expect(panel.take()).toEqual([]);
+		expect(panel.$(`#members li[data-member="${SELF}"] input`)).toBeNull();
+	});
+
+	test("Remove and the group's Disconnect ask first, in the panel: a second click, not a double click", async () => {
+		const panel = await openPanel();
+		panel.show(signedIn());
+		const remove = () =>
+			panel.$<HTMLButtonElement>(`button[data-remove="${OTHER}"]`);
+		panel.take();
+		remove()?.click();
+		expect(remove()?.textContent).toBe("Remove? Click again");
+		expect(remove()?.hasAttribute("data-armed")).toBe(true);
+		expect(panel.$("#members-note")?.textContent).toContain(
+			"Removing a browser signs it out",
+		);
+		// A double click's second click does nothing.
+		remove()?.click();
+		expect(panel.take()).toEqual([]);
+		panel.later(WAIT_MS);
+		remove()?.click();
+		expect(panel.take()).toEqual([{ type: "remove-member", member: OTHER }]);
+		expect(texts(panel, "#group-grants .app")).toEqual(["Claude claude.ai"]);
+		expect(panel.$("#group-grants-heading")?.textContent).toBe(
+			"AI apps connected to all your browsers",
+		);
+		const disconnect = () =>
+			panel.$<HTMLButtonElement>('button[data-group-grant="g_group"]');
+		disconnect()?.click();
+		expect(disconnect()?.textContent).toBe("Disconnect? Click again");
+		panel.later(WAIT_MS);
+		disconnect()?.click();
+		expect(panel.take()).toEqual([
+			{ type: "revoke-group-grant", grantId: "g_group" },
+		]);
+	});
+
+	test("a browser that joined: a notice with OK; AI access off: the name, and how to change it", async () => {
+		const panel = await openPanel();
+		panel.show(
+			signedIn({
+				notice:
+					"“Firefox on Linux” signed in with your account and joined your browsers. If you did not sign it in, remove it below.",
+			}),
+		);
+		expect(panel.$("#account-notice-box")?.hidden).toBe(false);
+		expect(panel.$("#account-notice")?.getAttribute("role")).toBe("status");
+		panel.take();
+		panel.$<HTMLButtonElement>("#account-notice-ok")?.click();
+		expect(panel.take()).toEqual([{ type: "dismiss-sign-in-notice" }]);
+		panel.show(
+			withSignIn({
+				providers: [],
+				connected: false,
+				account: { providerName: "Google", displayName: "ada@example.com" },
+			}),
+		);
+		expect(panel.$("#signed-in")?.textContent).toBe(
+			"Signed in as ada@example.com with Google",
+		);
+		expect(panel.$("#account-off")?.hidden).toBe(false);
+		expect(panel.$("#sign-out")?.hidden).toBe(true);
+		expect(panel.doc.querySelectorAll("#members li").length).toBe(0);
+	});
+
+	test("Connect your AI app says the AI app can sign in instead; the target line names the browser", async () => {
+		const panel = await openPanel();
+		panel.show({
+			...signedIn(),
+			status: "waiting",
+			grants: [],
+			pairing: true,
+			address: "https://relay.example/s/tab-mcp-extension/mcp",
+			code: "BCDF-GHJK",
+			target: {
+				mode: "pinned",
+				elsewhere: true,
+				browser: { label: "work Chrome", self: false },
+			},
+		});
+		expect(panel.$("#pairing-group")?.hidden).toBe(false);
+		expect(panel.$("#pairing-group")?.textContent).toBe(
+			"Or, on the sign-in page, sign in with your Microsoft account instead of typing the code: the AI app then works with all your browsers.",
+		);
+		expect(panel.$("#target-line")?.textContent).toBe(
+			"AI apps work in: work Chrome › a tab there (pinned)",
+		);
+		panel.show({
+			...signedIn(),
+			target: {
+				mode: "front",
+				browser: { label: "Chrome on macOS", self: true },
+			},
+		});
+		expect(panel.$("#target-line")?.textContent).toBe(
+			"AI apps work in: this browser › the tab in front",
+		);
+	});
+
+	test("Firefox: the card speaks of no other browser than the ones it lists", async () => {
+		const panel = await openPanel({ firefox: true });
+		panel.show(withSignIn({ providers, connected: true }));
+		expect(panel.$("#account")?.innerHTML).not.toContain("Chrome");
+		expect(texts(panel, "#sign-in button").length).toBe(3);
+	});
+});

@@ -69,6 +69,8 @@ function whereCallsGo(
 ): string {
 	if (setting.mode === "front")
 		return "Calls without a tab argument go to the tab in front of the user's browser window (inFront).";
+	if (setting.elsewhere)
+		return "Calls without a tab argument go to a tab pinned in another of the user's browsers, not to these tabs: pass tab to work in one of them, or use_tab to pin it.";
 	if (pin === "none")
 		return "Calls without a tab argument go to a pinned tab; none is pinned yet, so the next one pins the tab in front.";
 	if (pin === "closed")

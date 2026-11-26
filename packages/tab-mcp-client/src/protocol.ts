@@ -126,6 +126,8 @@ export type TabMessage =
 			secret: string;
 			/** Take the address back: the relay revokes its grants as it claims it (DEC-095). */
 			revokeAll?: true;
+			/** What the tab understands beyond the library's messages (`RelayMessages`). */
+			capabilities?: string[];
 	  }
 	| { type: "pong"; t: number }
 	| { type: "bye"; reason: string }
@@ -152,7 +154,87 @@ export type TabMessage =
 	| { type: "identity.logout" }
 	| { type: "error"; code: string; message: string; id?: string };
 
+/**
+ * A message of a type the library does not speak itself, sent for a
+ * `RelayMessages` user (the `send` its `receive` gets).
+ */
+export type RelayMessageOut = { type: string } & Record<string, unknown>;
+
+/** The types of the tab's messages the library sends itself: none of them through `RelayMessages`. */
+const TAB_TYPES: ReadonlySet<string> = new Set([
+	"hello",
+	"pong",
+	"bye",
+	"http.response",
+	"http.response.start",
+	"http.response.chunk",
+	"http.response.end",
+	"pairing.start",
+	"pairing.stop",
+	"grant.revoke",
+	"grants.revokeAll",
+	"identity",
+	"identity.logout",
+	"error",
+]);
+
+/** Whether `message` may go out for a `RelayMessages` user: a type that is not the library's. */
+export function isOtherTabMessage(
+	message: unknown,
+): message is RelayMessageOut {
+	return (
+		typeof message === "object" &&
+		message !== null &&
+		typeof (message as { type?: unknown }).type === "string" &&
+		!TAB_TYPES.has((message as { type: string }).type)
+	);
+}
+
+/** A `hello.capabilities` name, as the relay takes it. */
+const CAPABILITY = /^[a-z0-9][a-z0-9.-]{0,31}$/;
+
+/** Whether `names` may go into `hello.capabilities` (at most 16 names). */
+export function isCapabilityList(names: unknown): names is readonly string[] {
+	return (
+		Array.isArray(names) &&
+		names.length <= 16 &&
+		names.every((n) => typeof n === "string" && CAPABILITY.test(n))
+	);
+}
+
+/** The types of the relay's messages the library reads (`parseRelayMessage`). */
+const RELAY_TYPES = new Set([
+	"session",
+	"ping",
+	"bye",
+	"http.request",
+	"http.cancel",
+	"pairing.code",
+	"pairing.open",
+	"grant.added",
+	"grant.removed",
+	"identity.bound",
+	"error",
+]);
+
 type Json = Record<string, unknown>;
+
+/**
+ * A frame of a type the library does not know, for `RelayMessages`: an
+ * object with a string `type`; `undefined` for anything else (a known
+ * type, malformed or not, is the library's).
+ */
+export function otherRelayMessage(text: string): Json | undefined {
+	let v: unknown;
+	try {
+		v = JSON.parse(text);
+	} catch {
+		return undefined;
+	}
+	return isObject(v) && str(v["type"]) && !RELAY_TYPES.has(v["type"])
+		? v
+		: undefined;
+}
 
 function isObject(v: unknown): v is Json {
 	return typeof v === "object" && v !== null && !Array.isArray(v);

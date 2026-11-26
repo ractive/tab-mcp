@@ -459,6 +459,39 @@ export interface TabMcpOptions {
 	 * is reported either way.
 	 */
 	trustExtension?: boolean;
+	/**
+	 * For a browser extension that speaks more of the tab–relay protocol
+	 * than the library does (the tab-mcp browser extension's sign-in at the
+	 * relay, DEC-233); a page has no use for it. See `RelayMessages`.
+	 */
+	relayMessages?: RelayMessages;
+}
+
+/**
+ * Messages of the tab–relay protocol that the library does not speak
+ * itself (`docs/protocol.md`): the `capabilities` it names in `hello`, and
+ * what it hands on, with a way to answer.
+ */
+export interface RelayMessages {
+	/**
+	 * Named in `hello.capabilities`: at most 16 names of 1 to 32 characters
+	 * of `a-z`, `0-9`, `.` and `-`, starting with a letter or digit (else
+	 * the constructor throws a `TypeError`), such as `signin.v1`.
+	 */
+	capabilities: readonly string[];
+	/**
+	 * Each session's `session` message as the relay sent it, right after
+	 * `connect()` resolved, and then every message of a type the library
+	 * does not know, in their order, until the session ends. The objects
+	 * are the relay's: check every field before you use it. `send` sends a
+	 * message on that session: `false` once it is over (or the message
+	 * could not be sent), a `TypeError` for a type the library sends itself
+	 * (`hello`, `grant.revoke`, …).
+	 */
+	receive(
+		message: Readonly<Record<string, unknown>>,
+		send: (message: { type: string } & Record<string, unknown>) => boolean,
+	): void;
 }
 
 /** The library is reconnecting by itself (`state` is `reconnecting`). */

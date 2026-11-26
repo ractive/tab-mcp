@@ -105,8 +105,21 @@ import {
 	saveRelay,
 	saveReplaced,
 } from "./settings.ts";
+import {
+	browserName,
+	osName,
+	SIGN_IN_CAPABILITY,
+	SignIn,
+	type SignInHost,
+	type StoredSignIn,
+} from "./signin.ts";
 import { tabTools } from "./tab-tools.ts";
-import { chromeSession, kvTargetStore, Targets } from "./targets.ts";
+import {
+	chromeSession,
+	kvTargetStore,
+	type TargetStore,
+	Targets,
+} from "./targets.ts";
 import { createTools, INSTRUCTIONS, tabOf } from "./tools.ts";
 
 /** What a Disconnect while not connected says (it did nothing). */
@@ -253,7 +266,9 @@ export class Connection {
 		(call, added) => this.#callChanged(call, added),
 		{
 			nameOf: (grantId) =>
-				this.#grants.find((g) => g.grantId === grantId)?.name,
+				[...this.#grants, ...this.#groupGrants()].find(
+					(g) => g.grantId === grantId,
+				)?.name,
 		},
 	);
 	/** The count the panels were last told. */
@@ -278,6 +293,12 @@ export class Connection {
 	#tabRead = 0;
 	/** Where calls go: the tab in front or a pinned tab (DEC-230). */
 	readonly #targets: Targets;
+	/** Signed in at the relay, and the group (DEC-233). */
+	readonly #signIn: SignIn;
+	/** Sends the sign-in's messages on the session now (`relayMessages`). */
+	#relaySend:
+		| ((message: { type: string } & Record<string, unknown>) => boolean)
+		| undefined;
 	/** WebMCP given late, where a page read has none (DEC-223). */
 	readonly #late = new LateWebMCP(
 		giveWebMCP,
@@ -305,6 +326,7 @@ export class Connection {
 		aiOn: boolean,
 		grants: GrantView[],
 		fill: FillSetting,
+		signedIn: StoredSignIn = {},
 	) {
 		this.#kv = kv;
 		this.#fill = fill;
@@ -316,10 +338,18 @@ export class Connection {
 		this.#relay = relay;
 		this.#replaced = replaced;
 		this.#questions = new Questions(this.#questionsHost());
+		this.#signIn = new SignIn(kv, this.#signInHost(), signedIn);
+		// The browser's own setting, or, signed in, the group's (DEC-233).
+		const own = kvTargetStore(kv, chromeSession());
+		const group = this.#signIn.targetStore();
+		const store: TargetStore = {
+			load: () => (this.#signIn.active ? group : own).load(),
+			save: (setting) => (this.#signIn.active ? group : own).save(setting),
+		};
 		// A change of the mode or the pin: the bridge offers the tools of the
 		// tab calls go to now, and the panels show it.
 		this.#targets = new Targets(
-			kvTargetStore(kv, chromeSession()),
+			store,
 			{
 				front: tabInFront,
 				tab: tabInNormalWindow,
@@ -353,17 +383,27 @@ export class Connection {
 		// A previous worker's questions died with it: their notifications
 		// would answer nothing.
 		await clearNotifications();
-		const [storage, icons, allowed, relay, on, replaced, grants, fill] =
-			await Promise.all([
-				CachedSecretStorage.load(kv),
-				iconsFor(),
-				loadAllowed(kv),
-				loadRelay(kv),
-				loadAiOn(kv),
-				loadReplaced(kv),
-				loadGrants(kv),
-				FillSetting.load(kv),
-			]);
+		const [
+			storage,
+			icons,
+			allowed,
+			relay,
+			on,
+			replaced,
+			grants,
+			fill,
+			signedIn,
+		] = await Promise.all([
+			CachedSecretStorage.load(kv),
+			iconsFor(),
+			loadAllowed(kv),
+			loadRelay(kv),
+			loadAiOn(kv),
+			loadReplaced(kv),
+			loadGrants(kv),
+			FillSetting.load(kv),
+			SignIn.stored(kv),
+		]);
 		const connection = new Connection(
 			storage,
 			icons,
@@ -374,6 +414,7 @@ export class Connection {
 			on,
 			grants,
 			fill,
+			signedIn,
 		);
 		connection.#showBadge();
 		connection.syncFill();
@@ -407,6 +448,16 @@ export class Connection {
 			// has a document, which gets `modelContext` once Firefox turns
 			// WebMCP on, and the extension's tools are for its AI apps only.
 			webmcp: false,
+			// Sign-in at the relay and the group (DEC-233); a relay without
+			// it answers as before.
+			relayMessages: {
+				capabilities: [SIGN_IN_CAPABILITY],
+				receive: (message, send) => {
+					if (this.#mcp !== mcp) return;
+					this.#relaySend = send;
+					this.#signIn.receive(message);
+				},
+			},
 		});
 		// Every tool of the extension's, the page's too, binds its call for
 		// "Recent calls" as it runs (DEC-226).
@@ -602,7 +653,11 @@ export class Connection {
 					this.#problem = undefined;
 					void this.#setReplaced(undefined);
 					void this.#setAiOn(true);
-				} else if (reason === "user") void this.#setAiOn(false);
+				} else {
+					this.#relaySend = undefined;
+					this.#signIn.disconnected();
+					if (reason === "user") void this.#setAiOn(false);
+				}
 				this.#changed();
 			},
 			{ signal },
@@ -620,9 +675,18 @@ export class Connection {
 		mcp.addEventListener(
 			"error",
 			(event) => {
-				this.#problem = message(
-					(event as CustomEvent<{ error: unknown }>).detail.error,
-				);
+				const { error } = (event as CustomEvent<{ error: unknown }>).detail;
+				// A refusal of a sign-in or group message: the sign-in's own line.
+				const about = (error ?? {}) as { for?: unknown; code?: unknown };
+				if (
+					typeof about.for === "string" &&
+					this.#signIn.refused(
+						about.for,
+						typeof about.code === "string" ? about.code : "",
+					)
+				)
+					return;
+				this.#problem = message(error);
 				this.#changed();
 			},
 			{ signal },
@@ -680,8 +744,11 @@ export class Connection {
 		if (old !== undefined) await this.#giveBackAccess(old);
 		this.#relay = relay;
 		await this.#setReplaced(undefined);
-		// Apps paired through the relay before are not paired with this one.
+		// Apps paired through the relay before are not paired with this one,
+		// and its sign-in is not this one's.
 		await this.#setGrants([]);
+		this.#relaySend = undefined;
+		await this.#signIn.reset();
 		this.#problem = undefined;
 		[this.#mcp, this.#bridge] = this.#create(relay);
 		this.#watch(this.#mcp);
@@ -710,6 +777,16 @@ export class Connection {
 				void this.#readTab();
 			else this.tabChanged();
 		});
+	}
+
+	/**
+	 * A window of this browser gained the focus (`windowId`, or
+	 * `WINDOW_ID_NONE` when the browser lost it): signed in, in mode "the tab
+	 * in front", the relay hears it (DEC-233).
+	 */
+	windowFocused(windowId: number): void {
+		if (windowId !== chrome.windows.WINDOW_ID_NONE)
+			this.#signIn.windowFocused();
 	}
 
 	/**
@@ -959,6 +1036,24 @@ export class Connection {
 			case "set-target-mode":
 				await this.#targets.setMode(command.mode);
 				return;
+			case "sign-in":
+				await this.#signIn.start(command.provider);
+				return;
+			case "sign-out":
+				this.#signIn.signOut();
+				return;
+			case "rename-member":
+				this.#signIn.rename(command.member, command.label);
+				return;
+			case "remove-member":
+				this.#signIn.remove(command.member);
+				return;
+			case "revoke-group-grant":
+				this.#signIn.revokeGrant(command.grantId);
+				return;
+			case "dismiss-sign-in-notice":
+				this.#signIn.dismissNotice();
+				return;
 			case "work-here": {
 				// Only the tab the panels show now: a click on a tab shown
 				// before (the user switched since) pins nothing.
@@ -1021,6 +1116,10 @@ export class Connection {
 		const takeBack = this.#replaced !== undefined && !this.#replacedHere;
 		this.#problem = undefined;
 		this.#changed();
+		// A new secret is a new browser to the relay: signed out first, so
+		// that the group does not keep this one as a member that never
+		// comes back (DEC-233).
+		this.#signIn.signOut();
 		try {
 			if (takeBack) await this.#mcp.connect({ resume: true });
 			await this.#mcp.disconnectAll();
@@ -1217,6 +1316,50 @@ export class Connection {
 		};
 	}
 
+	/** The AI apps connected to the whole group (DEC-233), while signed in. */
+	#groupGrants(): GrantView[] {
+		return this.#signIn?.group?.grants ?? [];
+	}
+
+	/** The sign-in's parts of the browser and the connection (DEC-233). */
+	#signInHost(): SignInHost {
+		return {
+			send: (message) => this.#relaySend?.(message) === true,
+			auth: {
+				redirectUrl: () => chrome.identity.getRedirectURL(),
+				launch: (url) =>
+					chrome.identity.launchWebAuthFlow({ url, interactive: true }),
+			},
+			label: async () => {
+				const { os } = await chrome.runtime.getPlatformInfo();
+				return `${browserName(FIREFOX, navigator.userAgent)} on ${osName(os)}`;
+			},
+			relayOrigin: () => relayPageOrigin(this.#relay),
+			notify: (id, title, text) => {
+				notificationApi()
+					.create(
+						id,
+						notificationOptions({
+							type: "basic",
+							iconUrl: chrome.runtime.getURL("icons/icon-128.png"),
+							title,
+							message: text,
+							priority: 0,
+						}),
+					)
+					.catch((error: unknown) =>
+						// The panel's notice is there in any case.
+						console.warn("tab-mcp: notification", error),
+					);
+			},
+			changed: () => this.#changed(),
+			targetsChanged: () => void this.#targets.reload().catch(() => {}),
+			targetShown: () => void this.#readTab(),
+			focusedHere: async () =>
+				(await chrome.windows.getLastFocused()).focused === true,
+		};
+	}
+
 	#questionsHost(): QuestionsHost {
 		return {
 			windowOf: async (tabId) => {
@@ -1372,10 +1515,26 @@ export class Connection {
 		this.#changed();
 	}
 
-	/** Where calls go, for the panels: the mode, and the pinned tab's title. */
+	/**
+	 * Where calls go, for the panels: the mode, and the pinned tab's title;
+	 * signed in, the browser of the group the relay named (DEC-233).
+	 */
 	async #targetView(): Promise<TargetView> {
-		const { mode, pin } = await this.#targets.setting();
-		if (mode === "front" || pin === undefined) return { mode };
+		const { mode, pin, elsewhere } = await this.#targets.setting();
+		const group = this.#signIn.group;
+		const browserOf = (member: string | undefined) =>
+			group === undefined || member === undefined
+				? {}
+				: {
+						browser: {
+							label: this.#signIn.labelOf(member) ?? "Browser",
+							self: member === group.self,
+						},
+					};
+		if (mode === "front") return { mode, ...browserOf(group?.focus) };
+		if (elsewhere)
+			return { mode, elsewhere: true, ...browserOf(group?.pin?.member) };
+		if (pin === undefined) return { mode };
 		const tab = await tabInNormalWindow(pin);
 		return {
 			mode,
@@ -1383,6 +1542,7 @@ export class Connection {
 				tab === undefined
 					? { tabId: pin, title: "", closed: true }
 					: { tabId: pin, title: tab.title },
+			...browserOf(group?.self),
 		};
 	}
 
@@ -1399,6 +1559,7 @@ export class Connection {
 		const address = mcp.session?.address;
 		const code = mcp.pairingCode?.code;
 		const problem = this.#problem;
+		const signIn = this.#signIn.view();
 		return {
 			relay: this.#relay,
 			status,
@@ -1425,6 +1586,7 @@ export class Connection {
 				: {}),
 			...(this.#tab !== undefined ? { tab: this.#tab } : {}),
 			...(this.#target !== undefined ? { target: this.#target } : {}),
+			...(signIn !== undefined ? { signIn } : {}),
 			questions: this.#questions.list.map(({ args: _, ...q }) => q),
 			expired: this.#questions.expired,
 		};
@@ -1443,8 +1605,15 @@ export class Connection {
 		return {
 			name: PRODUCT,
 			on,
+			// The group's AI apps reach its pages too (DEC-233).
 			apps: on
-				? mcp.grants.map((g) => ({ name: g.client.name, host: g.client.host }))
+				? [
+						...mcp.grants.map((g) => ({
+							name: g.client.name,
+							host: g.client.host,
+						})),
+						...this.#groupGrants().map((g) => ({ name: g.name, host: g.host })),
+					]
 				: [],
 			// An AI app reaches a tab that is not in front too (a pinned
 			// one, a call's tab argument), in either mode: the page does not
@@ -1499,7 +1668,8 @@ export class Connection {
 	#status(): PanelState["status"] {
 		return panelStatus({
 			state: this.#mcp.state,
-			grants: this.#mcp.grants.length,
+			// An AI app connected to the whole group counts (DEC-233).
+			grants: this.#mcp.grants.length + this.#groupGrants().length,
 			aiOn: this.#aiOn,
 			replaced: this.#replaced !== undefined,
 		});

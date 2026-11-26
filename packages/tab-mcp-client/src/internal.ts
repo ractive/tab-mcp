@@ -12,6 +12,7 @@ import type {
 	DisconnectReason,
 	Grant,
 	PairingCode,
+	RelayMessages,
 	ReplacedDetail,
 	ServerInfo,
 	SessionInfo,
@@ -49,6 +50,8 @@ export interface ConnectionHost extends CallHost {
 	readonly tabs: string | undefined;
 	/** Sent in `hello`. */
 	readonly library: { name: string; version: string };
+	/** `TabMcpOptions.relayMessages`: its capabilities go into `hello`. */
+	readonly extra: RelayMessages | undefined;
 	/** The caller of a tunnelled request, with the name from the grants list. */
 	clientFor(grant: GrantRef): ToolCallClient;
 	/** The relay accepted the session; returns what `connect()` resolves with. */

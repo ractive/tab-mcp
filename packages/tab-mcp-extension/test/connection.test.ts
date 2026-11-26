@@ -6,7 +6,7 @@
  * this code decided (iteration 50).
  */
 
-import { afterAll, describe, expect, spyOn, test } from "bun:test";
+import { afterAll, afterEach, describe, expect, spyOn, test } from "bun:test";
 import {
 	type ModelContextTool,
 	TabMcp,
@@ -22,6 +22,7 @@ import { FillSetting } from "../src/worker/fill.ts";
 import { memoryKv } from "../src/worker/kv.ts";
 import { ARGS_CUT_NOTE } from "../src/worker/questions.ts";
 import { CachedSecretStorage } from "../src/worker/secret.ts";
+import { SignIn } from "../src/worker/signin.ts";
 
 const ID = "abcdefghijklmnopabcdefghijklmnop";
 const SITE = "https://shop.example";
@@ -55,6 +56,10 @@ interface Fake {
 	noWebmcp?: boolean;
 	/** The content script id the tab shows when probed ("doc-1", the page read, by default). */
 	shownDocument?: string;
+	/** `identity.launchWebAuthFlow`: the address the flow ends at (DEC-233). */
+	authFlow?: (url: string) => Promise<string | undefined>;
+	/** The URLs `launchWebAuthFlow` was opened at. */
+	authUrls?: string[];
 }
 
 /**
@@ -89,8 +94,19 @@ function fakeChrome(fake: Fake) {
 			id: ID,
 			getURL: (path: string) => `chrome-extension://${ID}/${path}`,
 			getManifest: () => ({ version: "1.0.0" }),
+			getPlatformInfo: async () => ({ os: "mac" }),
+		},
+		identity: {
+			getRedirectURL: () => `https://${ID}.chromiumapp.org/`,
+			launchWebAuthFlow: async ({ url }: { url: string }) => {
+				fake.authUrls ??= [];
+				fake.authUrls.push(url);
+				if (fake.authFlow === undefined) throw new Error("no flow");
+				return fake.authFlow(url);
+			},
 		},
 		windows: {
+			WINDOW_ID_NONE: -1,
 			getLastFocused: async () => ({ id: 1, focused: fake.focused }),
 			get: async (id: number) => ({
 				id,
@@ -278,7 +294,10 @@ async function until(
 
 /**
  * A WebSocket that never reaches a relay (no network from unit tests): the
- * library's connect makes one, its disconnect closes it.
+ * library's connect makes one, its disconnect closes it. With `relay` set
+ * it opens and is the relay itself: it answers `hello` with a session (its
+ * `signIn`, if given), records what the tab sends, and delivers what a test
+ * gives it (DEC-233).
  */
 class FakeSocket extends EventTarget {
 	static readonly CONNECTING = 0;
@@ -286,12 +305,61 @@ class FakeSocket extends EventTarget {
 	static readonly CLOSING = 2;
 	static readonly CLOSED = 3;
 	static made: string[] = [];
+	/** Answer as a relay; `signIn` goes into the session. */
+	static relay: { signIn?: unknown } | undefined;
+	static last: FakeSocket | undefined;
 	readyState = FakeSocket.CONNECTING;
+	protocol = "";
+	readonly sent: Record<string, unknown>[] = [];
 	constructor(readonly url: string) {
 		super();
 		FakeSocket.made.push(url);
+		FakeSocket.last = this;
+		if (FakeSocket.relay !== undefined)
+			queueMicrotask(() => {
+				this.readyState = FakeSocket.OPEN;
+				this.protocol = "tab-mcp.v1";
+				this.dispatchEvent(new Event("open"));
+			});
 	}
-	send(): void {}
+	send(data: string): void {
+		const relay = FakeSocket.relay;
+		if (relay === undefined) return;
+		const message = JSON.parse(data) as Record<string, unknown>;
+		this.sent.push(message);
+		if (message["type"] === "hello")
+			this.deliver({
+				type: "session",
+				sessionId: "s_1",
+				address: `${RELAY}/s/tab-mcp-extension/mcp`,
+				origin: `chrome-extension://${ID}`,
+				pairing: "code",
+				expiresAt: new Date(Date.now() + 3_600_000).toISOString(),
+				limits: {
+					maxMessageBytes: 1_048_576,
+					maxBodyBytes: 1_048_576,
+					requestTimeoutMs: 300_000,
+					idleTimeoutMs: 3_600_000,
+					heartbeatMs: 60_000,
+					keepAliveMs: 20_000,
+					maxConcurrentRequests: 8,
+				},
+				grants: [],
+				...(relay.signIn === undefined ? {} : { signIn: relay.signIn }),
+			});
+	}
+	/** A message of the relay's. */
+	deliver(message: Record<string, unknown>): void {
+		queueMicrotask(() =>
+			this.dispatchEvent(
+				new MessageEvent("message", { data: JSON.stringify(message) }),
+			),
+		);
+	}
+	/** What the tab sent of `type`. */
+	of(type: string): Record<string, unknown>[] {
+		return this.sent.filter((m) => m["type"] === type);
+	}
 	close(code = 1000, reason = ""): void {
 		if (this.readyState === FakeSocket.CLOSED) return;
 		this.readyState = FakeSocket.CLOSED;
@@ -350,6 +418,8 @@ async function connection(
 		fill?: boolean;
 		/** The AI apps' hosts filled in for without a question (DEC-213). */
 		alwaysHosts?: string[];
+		/** More entries of the worker's IndexedDB (the sign-in's, DEC-233). */
+		stored?: Record<string, unknown>;
 	} = {},
 ) {
 	const fake: Fake = {
@@ -364,6 +434,7 @@ async function connection(
 	g.chrome = fakeChrome(fake);
 	// Stored, as start() loads them.
 	const kv = memoryKv({
+		...options.stored,
 		relay: RELAY,
 		...(options.allowed ? { allowedTools: options.allowed } : {}),
 		...(options.fill ? { fillCodeFor: RELAY } : {}),
@@ -389,6 +460,7 @@ async function connection(
 		options.aiOn ?? false,
 		[],
 		await FillSetting.load(kv, async () => true),
+		await SignIn.stored(kv),
 	);
 	return { c, kv, fake };
 }
@@ -765,6 +837,461 @@ test("the extension's own library mirrors nothing into WebMCP, even with a docum
 	} finally {
 		Object.assign(w, saved);
 	}
+});
+
+describe("signed in at the relay, and the group (DEC-233)", () => {
+	const SELF = "m_self000000000000";
+	const OTHER_MEMBER = "m_other00000000000";
+	const PROVIDERS = [
+		{ id: "google", name: "Google" },
+		{ id: "microsoft", name: "Microsoft" },
+	];
+	const ACCOUNT = {
+		provider: "google",
+		providerName: "Google",
+		displayName: "ada@example.com",
+	};
+	afterEach(() => {
+		FakeSocket.relay = undefined;
+	});
+
+	/** The group message as the relay sends it. */
+	const group = (more: Record<string, unknown> = {}) => ({
+		type: "group",
+		provider: "microsoft",
+		self: SELF,
+		expiresAt: new Date(Date.now() + 86_400_000).toISOString(),
+		maxMembers: 16,
+		members: [{ id: SELF, label: "Chrome on macOS", online: true }],
+		mode: "front",
+		grants: [],
+		...more,
+	});
+
+	/** A connection, connected to the fake relay with `signIn` in its session. */
+	async function signedIn(
+		signIn: unknown,
+		options: Parameters<typeof connection>[0] = {},
+	) {
+		FakeSocket.relay = { signIn };
+		const made = await connection(options);
+		const panel = fakePanel();
+		const receive = made.c.addPanel(panel.port);
+		receive({ type: "connect" });
+		await until(
+			() =>
+				panel.state()?.status === "waiting" || panel.state()?.status === "on",
+			"connected",
+		);
+		const socket = FakeSocket.last;
+		if (socket === undefined) throw new Error("no socket");
+		const stop = async () => {
+			receive({ type: "stop" });
+			await until(() => panel.state()?.status === "off", "off");
+		};
+		return { ...made, panel, receive, socket, stop };
+	}
+
+	test("hello names signin.v1; a relay that offers no sign-in shows nothing new, and the setting stays the browser's own", async () => {
+		const { c, panel, receive, socket, kv, stop } = await signedIn(undefined, {
+			tools: [pageTool("look", true)],
+		});
+		expect(socket.of("hello")[0]?.["capabilities"]).toEqual(["signin.v1"]);
+		expect(panel.state()?.signIn).toBeUndefined();
+		receive({ type: "set-target-mode", mode: "pinned" });
+		await until(() => panel.state()?.target?.mode === "pinned", "pinned");
+		expect(kv.data.get("aiTarget")).toEqual({ mode: "pinned" });
+		expect(socket.of("group.mode")).toEqual([]);
+		c.windowFocused(1);
+		await Bun.sleep(10);
+		expect(socket.of("focus")).toEqual([]);
+		await stop();
+	});
+
+	test("Sign in: the relay's URL in launchWebAuthFlow, the code back over the socket; signed in with its kind, kept only in the extension", async () => {
+		const { panel, receive, socket, kv, fake, stop } = await signedIn({
+			providers: PROVIDERS,
+		});
+		expect(panel.state()?.signIn).toMatchObject({
+			providers: PROVIDERS,
+			connected: true,
+		});
+		fake.authFlow = async () =>
+			`https://${ID}.chromiumapp.org/?signin=completion-code`;
+		receive({ type: "sign-in", provider: "microsoft" });
+		await until(() => socket.of("signin.start").length === 1, "the start");
+		expect(socket.of("signin.start")[0]).toEqual({
+			type: "signin.start",
+			provider: "microsoft",
+			redirectUrl: `https://${ID}.chromiumapp.org/`,
+			label: "Chrome on macOS",
+		});
+		expect(panel.state()?.signIn?.pending).toBe("Microsoft");
+		// Not the relay's own address: never opened.
+		socket.deliver({
+			type: "signin.url",
+			provider: "microsoft",
+			url: "https://evil.example/signin?flow=x",
+			expiresAt: "",
+		});
+		await until(
+			() => panel.state()?.signIn?.problem !== undefined,
+			"the refusal",
+		);
+		expect(fake.authUrls ?? []).toEqual([]);
+		receive({ type: "sign-in", provider: "microsoft" });
+		await until(() => socket.of("signin.start").length === 2, "again");
+		socket.deliver({
+			type: "signin.url",
+			provider: "microsoft",
+			url: `${RELAY}/signin?flow=abc`,
+			expiresAt: "",
+		});
+		await until(() => socket.of("signin.complete").length === 1, "complete");
+		expect(fake.authUrls).toEqual([`${RELAY}/signin?flow=abc`]);
+		expect(socket.of("signin.complete")[0]).toEqual({
+			type: "signin.complete",
+			code: "completion-code",
+		});
+		socket.deliver({
+			type: "signin.done",
+			provider: "microsoft",
+			displayName: "ada@example.ch",
+			kind: "work",
+			member: SELF,
+		});
+		socket.deliver(group());
+		await until(
+			() => panel.state()?.signIn?.members !== undefined,
+			"the group",
+		);
+		expect(panel.state()?.signIn).toMatchObject({
+			providers: [],
+			account: {
+				providerName: "Microsoft",
+				displayName: "ada@example.ch",
+				kind: "work",
+			},
+			members: [
+				{ id: SELF, label: "Chrome on macOS", online: true, self: true },
+			],
+		});
+		expect(panel.state()?.signIn?.pending).toBeUndefined();
+		expect(kv.data.get("signInAccount")).toEqual({
+			provider: "microsoft",
+			providerName: "Microsoft",
+			displayName: "ada@example.ch",
+			kind: "work",
+		});
+		// The name goes nowhere but the panel: not to the relay, not to pages.
+		expect(JSON.stringify(socket.sent)).not.toContain("ada@example.ch");
+		await stop();
+	});
+
+	test("a sign-in that comes back without a code: the reason in the panel's words; a Microsoft admin approval as such; a closed window", async () => {
+		const { panel, receive, socket, fake, stop } = await signedIn({
+			providers: PROVIDERS,
+		});
+		const back = async (address: string, provider = "microsoft") => {
+			fake.authFlow = async () => address;
+			const starts = socket.of("signin.start").length;
+			receive({ type: "sign-in", provider });
+			await until(() => socket.of("signin.start").length > starts, "start");
+			socket.deliver({
+				type: "signin.url",
+				provider,
+				url: `${RELAY}/signin?flow=f`,
+				expiresAt: "",
+			});
+			await until(
+				() =>
+					panel.state()?.signIn?.pending === undefined &&
+					panel.state()?.signIn?.problem !== undefined,
+				"the problem",
+			);
+			return panel.state()?.signIn?.problem;
+		};
+		const redirect = `https://${ID}.chromiumapp.org/`;
+		expect(await back(`${redirect}?signin_error=provider_error`)).toBe(
+			"Microsoft did not sign you in: cancelled or refused. With a work or school account, your organisation's administrator may have to approve tab-mcp relay first.",
+		);
+		expect(
+			await back(
+				`${redirect}?signin_error=provider_error&error_description=AADSTS90094%3A+Admin+consent+is+required`,
+			),
+		).toBe(
+			"Your organisation's administrator has to approve tab-mcp relay first.",
+		);
+		expect(await back(`${redirect}?signin_error=admin_approval`)).toBe(
+			"Your organisation's administrator has to approve tab-mcp relay first.",
+		);
+		expect(
+			await back(`${redirect}?signin_error=provider_error`, "google"),
+		).toBe("Google did not sign you in: cancelled or refused.");
+		expect(await back(`${redirect}?signin_error=cancelled`)).toBe(
+			"The sign-in was cancelled.",
+		);
+		fake.authFlow = async () => {
+			throw new Error("The user did not approve access.");
+		};
+		receive({ type: "sign-in", provider: "google" });
+		await until(() => socket.of("signin.start").length === 6, "start");
+		socket.deliver({
+			type: "signin.url",
+			provider: "google",
+			url: `${RELAY}/signin?flow=g`,
+			expiresAt: "",
+		});
+		await until(
+			() =>
+				panel.state()?.signIn?.problem?.includes("window was closed") === true,
+			"closed",
+		);
+		// The relay's own refusal, in the panel's words.
+		receive({ type: "sign-in", provider: "google" });
+		await until(() => socket.of("signin.start").length === 7, "start");
+		socket.deliver({
+			type: "signin.failed",
+			provider: "google",
+			reason: "group_full",
+			message: "the account has 16 browsers",
+		});
+		await until(
+			() =>
+				panel.state()?.signIn?.problem?.startsWith("Your account has") === true,
+			"group full",
+		);
+		expect(socket.of("signin.complete")).toEqual([]);
+		await stop();
+	});
+
+	test("signed in, where calls go is the group's: the setting sends group.mode, the first pinning call and Work here group.pin; a pin in another browser runs nothing here", async () => {
+		const { c, panel, receive, socket, kv, fake, stop } = await signedIn(
+			{ providers: PROVIDERS, member: SELF },
+			{ tools: [pageTool("look", true)] },
+		);
+		socket.deliver(
+			group({
+				members: [
+					{ id: SELF, label: "Chrome on macOS", online: true },
+					{ id: OTHER_MEMBER, label: "work Chrome", online: true },
+				],
+				focus: OTHER_MEMBER,
+			}),
+		);
+		await until(
+			() => panel.state()?.target?.browser?.label === "work Chrome",
+			"the focus shown",
+		);
+		expect(panel.state()?.target).toEqual({
+			mode: "front",
+			browser: { label: "work Chrome", self: false },
+		});
+		receive({ type: "set-target-mode", mode: "pinned" });
+		await until(() => socket.of("group.mode").length === 1, "group.mode");
+		expect(socket.of("group.mode")[0]).toEqual({
+			type: "group.mode",
+			mode: "pinned",
+		});
+		// The browser's own setting is left as it was.
+		expect(kv.data.get("aiTarget")).toBeUndefined();
+		// The first call in mode "pinned" pins the tab in front, for the group.
+		await callTool("page_info");
+		expect(socket.of("group.pin")).toEqual([{ type: "group.pin", tab: "1" }]);
+		expect(fake.session.get("pinnedTab")).toBeUndefined();
+		// The relay confirms; then another browser pins one of its tabs.
+		socket.deliver(group({ mode: "pinned", pin: { member: SELF, tab: "1" } }));
+		socket.deliver(
+			group({
+				members: [
+					{ id: SELF, label: "Chrome on macOS", online: true },
+					{ id: OTHER_MEMBER, label: "work Chrome", online: true },
+				],
+				mode: "pinned",
+				pin: { member: OTHER_MEMBER, tab: "77" },
+			}),
+		);
+		await until(() => panel.state()?.target?.elsewhere === true, "elsewhere");
+		expect(panel.state()?.target).toEqual({
+			mode: "pinned",
+			elsewhere: true,
+			browser: { label: "work Chrome", self: false },
+		});
+		await expect(callTool("page_info")).rejects.toThrow(
+			"The pinned tab is in another of the user's browsers",
+		);
+		// A call that names its tab still runs here.
+		expect(await callTool("page_info", { tab: "1" })).toMatchObject({
+			title: "Shop",
+		});
+		// Work here takes the pin back.
+		await until(() => panel.state()?.tab?.tabId === 1, "the tab shown");
+		receive({ type: "work-here", tabId: 1 });
+		await until(() => socket.of("group.pin").length === 2, "Work here");
+		expect(socket.of("group.pin")[1]).toEqual({ type: "group.pin", tab: "1" });
+		await until(
+			() => panel.state()?.target?.pinned?.tabId === 1,
+			"pinned here",
+		);
+		expect(panel.state()?.target?.browser).toEqual({
+			label: "Chrome on macOS",
+			self: true,
+		});
+		void c;
+		await stop();
+	});
+
+	test('focus: in mode "the tab in front" only, once after connecting if a window has it, and as one gains it; never in mode "a pinned tab"', async () => {
+		const { c, socket, stop } = await signedIn({
+			providers: PROVIDERS,
+			member: SELF,
+		});
+		socket.deliver(group());
+		await until(() => socket.of("focus").length === 1, "the first focus");
+		expect(socket.of("focus")[0]).toEqual({ type: "focus" });
+		c.windowFocused(1);
+		expect(socket.of("focus").length).toBe(2);
+		// The browser lost the focus: nothing to say.
+		c.windowFocused(-1);
+		expect(socket.of("focus").length).toBe(2);
+		socket.deliver(group({ mode: "pinned" }));
+		await Bun.sleep(20);
+		c.windowFocused(1);
+		expect(socket.of("focus").length).toBe(2);
+		await stop();
+	});
+
+	test("the group's AI apps: listed, connected (the status, the pages), each with Disconnect; a browser that joined is announced, the ones there at the sign-in are not", async () => {
+		const { c, panel, receive, socket, fake, stop } = await signedIn({
+			providers: PROVIDERS,
+			member: SELF,
+		});
+		const grant = {
+			grantId: "g_group",
+			client: { id: "https://claude.ai/x", name: "Claude", host: "claude.ai" },
+			createdAt: "2026-11-26T10:00:00.000Z",
+		};
+		socket.deliver(
+			group({
+				grants: [grant],
+				members: [
+					{ id: SELF, label: "Chrome on macOS", online: true },
+					{ id: OTHER_MEMBER, label: "work Chrome", online: false },
+				],
+			}),
+		);
+		await until(
+			() => panel.state()?.status === "on",
+			"on with the group's AI app",
+		);
+		expect(panel.state()?.signIn?.grants).toEqual([
+			{ grantId: "g_group", name: "Claude", host: "claude.ai" },
+		]);
+		expect(c.handshakeState().apps).toEqual([
+			{ name: "Claude", host: "claude.ai" },
+		]);
+		// The members of the first group are not news.
+		expect(panel.state()?.signIn?.notice).toBeUndefined();
+		expect(fake.notifications.some((id) => id.startsWith("joined:"))).toBe(
+			false,
+		);
+		receive({ type: "revoke-group-grant", grantId: "g_group" });
+		receive({ type: "revoke-group-grant", grantId: "g_unknown" });
+		await until(() => socket.of("group.grant.revoke").length === 1, "revoke");
+		await Bun.sleep(10);
+		expect(socket.of("group.grant.revoke")).toEqual([
+			{ type: "group.grant.revoke", grantId: "g_group" },
+		]);
+		socket.deliver(
+			group({
+				members: [
+					{ id: SELF, label: "Chrome on macOS", online: true },
+					{ id: OTHER_MEMBER, label: "work Chrome", online: false },
+					{ id: "m_new0000000000000", label: "Firefox on Linux", online: true },
+				],
+			}),
+		);
+		await until(
+			() => panel.state()?.signIn?.notice !== undefined,
+			"the join notice",
+		);
+		expect(panel.state()?.signIn?.notice).toBe(
+			"“Firefox on Linux” signed in with your account and joined your browsers. If you did not sign it in, remove it below.",
+		);
+		expect(
+			fake.notifications.filter((id) => id.startsWith("joined:")).length,
+		).toBe(1);
+		const shown = fake.notificationOptions.at(-1);
+		expect(shown?.["message"]).toContain(
+			"“Firefox on Linux” signed in with your account.",
+		);
+		receive({ type: "dismiss-sign-in-notice" });
+		await until(() => panel.state()?.signIn?.notice === undefined, "dismissed");
+		// Rename and remove go to the relay; removing itself is signing out.
+		receive({ type: "rename-member", member: OTHER_MEMBER, label: "  work  " });
+		receive({ type: "remove-member", member: "m_new0000000000000" });
+		receive({ type: "remove-member", member: SELF });
+		await until(() => socket.of("signin.out").length === 1, "sign-out");
+		expect(socket.of("member.rename")).toEqual([
+			{ type: "member.rename", member: OTHER_MEMBER, label: "work" },
+		]);
+		expect(socket.of("member.remove")).toEqual([
+			{ type: "member.remove", member: "m_new0000000000000" },
+		]);
+		await stop();
+	});
+
+	test("Sign out: the relay ends it; what was kept goes, the buttons are back, and the setting is the browser's own again", async () => {
+		const { panel, receive, socket, kv, stop } = await signedIn(
+			{ providers: PROVIDERS, member: SELF },
+			{ stored: { signInAccount: ACCOUNT } },
+		);
+		socket.deliver(group({ mode: "pinned" }));
+		await until(() => panel.state()?.target?.mode === "pinned", "the group's");
+		receive({ type: "sign-out" });
+		await until(() => socket.of("signin.out").length === 1, "signin.out");
+		socket.deliver({ type: "signin.ended", reason: "signed_out" });
+		await until(
+			() => (panel.state()?.signIn?.providers.length ?? 0) === 2,
+			"the buttons",
+		);
+		expect(kv.data.get("signInAccount")).toBeUndefined();
+		expect(kv.data.get("signInKnown")).toBeUndefined();
+		expect(panel.state()?.signIn?.members).toBeUndefined();
+		await until(() => panel.state()?.target?.mode === "front", "its own");
+		// Removed by another browser: said so.
+		socket.deliver({ type: "signin.ended", reason: "removed" });
+		await until(
+			() =>
+				panel.state()?.signIn?.notice?.includes("removed this one") === true,
+			"removed",
+		);
+		await stop();
+	});
+
+	test("a session that is not signed in any more forgets what was kept; a refusal of a group message is the sign-in's line, not the connection's problem", async () => {
+		const { panel, socket, kv, stop } = await signedIn(
+			{ providers: PROVIDERS },
+			{ stored: { signInAccount: ACCOUNT } },
+		);
+		await until(
+			() => panel.state()?.signIn?.providers.length === 2,
+			"the buttons",
+		);
+		expect(kv.data.get("signInAccount")).toBeUndefined();
+		socket.deliver({
+			type: "error",
+			code: "unknown_id",
+			message: "not signed in",
+			for: "group.mode",
+		});
+		await until(
+			() => panel.state()?.signIn?.problem !== undefined,
+			"the sign-in's problem",
+		);
+		expect(panel.state()?.problem).toBeUndefined();
+		await stop();
+	});
 });
 
 describe("the state for pages with the client library (DEC-207, DEC-221)", () => {
